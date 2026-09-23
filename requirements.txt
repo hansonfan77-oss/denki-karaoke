@@ -1,0 +1,10 @@
+# PyTorch 要另外用顯卡版來源安裝（setup.ps1 會處理）：
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+numpy          # Demucs 4.1.0 漏列這個相依，必須自己寫
+demucs>=4.0
+# 第 2 批：桌面介面
+fastapi>=0.110
+uvicorn>=0.29
+pywebview>=5.0
+# 第 2.3 批：預備拍（偵測速度與第一拍）
+librosa

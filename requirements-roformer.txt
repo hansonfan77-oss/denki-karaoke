@@ -1,0 +1,28 @@
+# 高品質／保留和聲模式（audio-separator）要用的套件。
+# audio-separator 本體用 --no-deps 另外裝（見 update_and_test.ps1），原因：
+#   它的相依 diffq 沒有 Python 3.11 的 Windows 版本，安裝時會要求 C++ 編譯器而失敗；
+#   而 diffq 只有它內建的另一種 Demucs 會用到，我們用的 RoFormer 模型完全不需要。
+# 也不要讓它重裝 PyTorch（會把顯卡版換成 CPU 版），所以這裡不列 torch。
+# 不列 onnx2torch-py313：它要求 torchvision，pip 從一般來源補裝時會把顯卡版 PyTorch 換成 CPU 版（2.1 版踩過）；
+#   它只有 MDX 架構會用到，RoFormer 用不到。
+onnxruntime
+beartype
+einops
+julius
+librosa
+ml_collections
+numpy
+onnx-weekly
+packaging
+pydub
+pyyaml
+requests
+resampy
+# ⚠️ 一定要鎖 0.6.5：0.9 版改了位置編碼的算法，BS-RoFormer 模型拿到錯的位置資訊，
+#   人聲軌變成全靜音（2.3.3 在 Hanson 電腦踩到：高品質模式去不掉人聲）。
+rotary-embedding-torch==0.6.5
+samplerate
+scipy
+six
+soundfile
+tqdm
