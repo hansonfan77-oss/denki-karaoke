@@ -117,6 +117,12 @@ def _log_environment() -> None:
 def main() -> int:
     _setup_logging()
     _log_environment()
+    # 工作目錄移出 app 資料夾：捷徑把它設在 app，視窗元件（WebView2）等子程序會跟著「待在」app 裡，
+    # 伴奏工具關掉後它們還會多活幾秒，程式內更新就搬不動 app（v0.5.0 更新踩到 WinError 32）。
+    try:
+        os.chdir(config.ROOT)
+    except OSError:
+        pass
     debug = "--debug" in sys.argv
     try:
         import webview

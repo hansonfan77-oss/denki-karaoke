@@ -52,15 +52,17 @@ def wait_for_exit(pid: int, timeout: float = 60) -> bool:
     return False
 
 
-def move(src: Path, dst: Path, tries: int = 40) -> None:
-    """改名搬資料夾。檔案剛被關掉時 Windows 可能還鎖著一下下（防毒掃描也會），重試到 20 秒。"""
+def move(src: Path, dst: Path, tries: int = 180) -> None:
+    """改名搬資料夾。伴奏工具剛關掉時，視窗元件（WebView2）的子程序、防毒掃描可能還佔著一下下，重試到 90 秒。"""
     last: Exception | None = None
-    for _ in range(tries):
+    for i in range(tries):
         try:
             os.replace(src, dst)
             return
         except OSError as e:
             last = e
+            if i == 20:
+                say("      程式資料夾還被佔用（視窗元件還沒完全關掉），再等一下…")
             time.sleep(0.5)
     raise RuntimeError(f"無法搬動 {src} → {dst}：{last}（是不是有檔案還開著？）")
 
