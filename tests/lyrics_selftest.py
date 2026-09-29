@@ -1,0 +1,182 @@
+"""自動測試 E 段：卡拉影片的歌詞與 AI 對時間（第 4 批）。由 tests/selftest.py 呼叫。"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+from karaoke import align, config, lyrics, pipeline
+from karaoke.project import Song
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+
+LRC_SAMPLE = """[ti:測試]
+[ar:DENKI]
+[offset:+200]
+[00:05.00]第一句 <00:05.50>逐字
+[00:10.50][01:00.00]副歌
+[00:14.00]
+[00:20.25]最後一句
+"""
+
+
+def _serve_bytes(routes: dict):
+    """本機假伺服器：{路徑: (狀態碼, bytes)}。回傳 (網址, server)。"""
+    import http.server
+    import threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            code, body = routes.get(self.path.split("?")[0], (404, b"{}"))
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{srv.server_address[1]}", srv
+
+
+def lyrics_tests(r, make_test_video) -> None:
+    r.info("")
+    r.info("【E. 卡拉影片：歌詞與對時間】")
+
+    # 1. LRC
+    ls = lyrics.parse_lrc(LRC_SAMPLE)
+    texts = [x["text"] for x in ls]
+    r.check("LRC 解析", texts == ["第一句 逐字", "副歌", "最後一句", "副歌"]
+            and abs(ls[0]["t"] - 4.8) < 1e-6 and ls[1]["end"] is not None and abs(ls[1]["end"] - 13.8) < 1e-6,
+            f"{len(ls)} 句（重複標籤、逐字標籤、offset、空白結束標籤）")
+    back = lyrics.parse_lrc(lyrics.format_lrc(ls, offset=1.0))
+    r.check("LRC 輸出再讀回", [x["text"] for x in back] == texts and abs(back[0]["t"] - 5.8) < 0.011
+            and back[1]["end"] is not None and abs(back[1]["end"] - 14.8) < 0.011, "時間、結束標籤都一致")
+    plain = lyrics.split_plain("[Chorus]\n街の灯り\n\n  君の声  \n[00:01.00]時間標籤會去掉\n")
+    r.check("貼上純文字整理", plain == ["街の灯り", "君の声", "時間標籤會去掉"], " / ".join(plain))
+
+    # 2. 歌名、語言
+    cases = {
+        "【リゼロ】劇中歌『Stay Alive ～Regain～』｜高橋李依": "Stay Alive ～Regain～",
+        "4、桃源恋歌": "桃源恋歌",
+        "10 天使にふれたよ!": "天使にふれたよ!",
+        "【ニコカラ】UNDEAD _ YOASOBI【 On vocal": "UNDEAD YOASOBI",
+    }
+    wrong = {k: lyrics.guess_title(k) for k, v in cases.items() if lyrics.guess_title(k) != v}
+    r.check("從檔名猜歌名", not wrong, f"{len(cases)} 種檔名" if not wrong else f"{wrong}")
+    langs = [lyrics.detect_language(s) for s in ("君の声だけ", "我們一起唱歌吧", "사랑해요 너를", "hello world")]
+    r.check("判斷歌詞語言", langs == ["ja", "zh", "ko", "en"], "、".join(langs))
+
+    # 3. AI 的逐字時間 → 每一句
+    words = [{"text": " 街の", "start": 1.0, "end": 1.5}, {"text": "灯り", "start": 1.5, "end": 2.2},
+             {"text": "、君", "start": 5.0, "end": 5.4}, {"text": "の声", "start": 5.4, "end": 6.0}]
+    m = lyrics.map_words_to_lines(words, ["街の灯り", "君の声"])
+    got = [(x["t"], x["end"]) for x in m]
+    r.check("逐字時間對應回每一句", got == [(1.0, 2.2), (5.0, 6.0)], f"{got}")
+
+    # 4. LRCLIB（本機假伺服器）
+    fake = [
+        {"id": 1, "trackName": "桃源恋歌", "artistName": "A", "duration": 250, "plainLyrics": "a\nb",
+         "syncedLyrics": None, "instrumental": False},
+        {"id": 2, "trackName": "桃源恋歌", "artistName": "B", "duration": 236, "plainLyrics": "x",
+         "syncedLyrics": "[00:01.00]x\n[00:03.00]y", "instrumental": False},
+        {"id": 3, "trackName": "桃源恋歌 (Inst.)", "artistName": "C", "duration": 235, "plainLyrics": None,
+         "syncedLyrics": None, "instrumental": True},
+    ]
+    url, srv = _serve_bytes({"/api/search": (200, json.dumps(fake).encode())})
+    saved_api = lyrics.LRCLIB_API
+    try:
+        lyrics.LRCLIB_API = url + "/api"
+        res = lyrics.search_lrclib("桃源恋歌", duration=235)
+        r.check("LRCLIB 搜尋與排序", [x["id"] for x in res] == [2, 1] and res[0]["synced"]
+                and res[0]["durationDiff"] == 1.0, "附時間的在前、純音樂版不列出")
+        lyrics.LRCLIB_API = "http://127.0.0.1:9/api"
+        try:
+            lyrics.search_lrclib("桃源恋歌")
+            r.fail("連不上 LRCLIB 的提示", "沒有丟出錯誤")
+        except lyrics.LyricsError as e:
+            r.ok("連不上 LRCLIB 的提示", str(e))
+    finally:
+        lyrics.LRCLIB_API = saved_api
+        srv.shutdown()
+
+    # 5. 歌詞存檔、AI 對時間（測試模式）、模型下載
+    with tempfile.TemporaryDirectory(prefix="denki-lyrics-") as tmp:
+        tmp = Path(tmp)
+        src = tmp / "桃源恋歌 測試.mp4"
+        make_test_video(src)
+        song = pipeline.analyze(src, backend="fake", songs_dir=tmp / "songs", log=lambda *_: None)
+        lyrics.save(song, ls, source="lrc", offset=1.25)
+        again = lyrics.load(Song.load(song.dir))
+        r.check("歌詞存檔與讀回", bool(again) and len(again["lines"]) == 4 and again["offset"] == 1.25
+                and again["lang"] == "zh", f"4 句，offset {again['offset'] if again else '-'}")
+        song.clear_cache()
+        r.check("清除中間檔不會刪歌詞", lyrics.load(Song.load(song.dir)) is not None, "lyrics.json 還在")
+        try:
+            align.vocals_for(Song.load(song.dir))
+            r.fail("沒有人聲中間檔會提示", "沒有擋下")
+        except align.AlignError as e:
+            r.ok("沒有人聲中間檔會提示", str(e)[:40] + "…")
+        song = pipeline.analyze(src, backend="fake", songs_dir=tmp / "songs", log=lambda *_: None)
+
+        os.environ["DENKI_ALIGN_FAKE"] = "1"
+        try:
+            got = align.align_song(song, "街の灯りが\n君の声だけ\n\n走り出した")
+            ts = [x["t"] for x in got["lines"]]
+            r.check("AI 對時間流程（測試模式）", got["source"] == "ai" and got["lang"] == "ja" and len(ts) == 3
+                    and ts == sorted(ts) and all(x["end"] and x["end"] > x["t"] for x in got["lines"]),
+                    f"3 句：{', '.join(f'{t:.1f}' for t in ts)} 秒")
+
+            payload = os.urandom(3_000_000)
+            url, srv = _serve_bytes({"/m.pt": (200, payload)})
+            os.environ["DENKI_ALIGN_MODEL_URL"] = url + "/m.pt"
+            os.environ["DENKI_ALIGN_MODEL_SHA256"] = hashlib.sha256(payload).hexdigest()
+            saved_models = config.MODELS_DIR
+            config.MODELS_DIR = tmp / "models"
+            part = lambda: align.model_file().with_suffix(".pt.part")  # noqa: E731
+            try:
+                align.download_model(lambda *a: None)
+                r.check("下載對時間模型（核對 SHA-256）",
+                        align.model_ready() and align.model_file().stat().st_size == len(payload), "3 MB 假模型")
+                os.environ["DENKI_ALIGN_MODEL_SHA256"] = "0" * 64
+                try:
+                    align.download_model(lambda *a: None)
+                    r.fail("模型核對不符會擋下", "沒有丟出錯誤")
+                except align.AlignError as e:
+                    r.check("模型核對不符會擋下", not align.model_ready() and not part().exists(), str(e))
+                tok = align.CancelToken()
+                tok.cancel()
+                try:
+                    align.download_model(lambda *a: None, tok)
+                    r.fail("下載可以取消", "沒有停下來")
+                except align.Cancelled:
+                    r.check("下載可以取消", not part().exists(), "半截檔案已刪除")
+            finally:
+                config.MODELS_DIR = saved_models
+                os.environ.pop("DENKI_ALIGN_MODEL_URL", None)
+                os.environ.pop("DENKI_ALIGN_MODEL_SHA256", None)
+                srv.shutdown()
+        finally:
+            os.environ.pop("DENKI_ALIGN_FAKE", None)
+
+    # 6. 真的元件載得進來（安裝了的電腦才檢查）
+    if importlib.util.find_spec("stable_whisper"):
+        t0 = time.perf_counter()
+        out = subprocess.run([sys.executable, "-c", "import stable_whisper, whisper; print('ok', whisper.__version__)"],
+                             cwd=ROOT_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        ok = out.stdout.strip().startswith("ok")
+        r.check("AI 對時間元件可以載入", ok,
+                f"whisper {out.stdout.strip()[3:]}，{time.perf_counter() - t0:.1f} 秒" if ok
+                else (out.stderr or "").strip()[-300:])
+        r.info(f"   對時間模型：{'已下載' if align.model_ready() else '還沒下載（第一次用到才下載，約 1.5 GB）'}")
+    else:
+        r.info("   （這台沒有安裝 AI 對時間元件，略過載入檢查）")

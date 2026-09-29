@@ -23,6 +23,17 @@ POST   /api/open               {path}         用系統開啟檔案或資料夾
 GET    /api/update?refresh=1                  更新狀態（refresh=1 立刻問 GitHub）
 POST   /api/update/start                      下載新版並交給更新小幫手（伴奏工具會自動關掉再開）
 POST   /api/update/ack                        上次更新的結果已經顯示過了
+
+第 4 批（卡拉影片：歌詞與對時間）
+GET    /api/lyrics/search?title=&artist=&duration=   搜尋 LRCLIB
+POST   /api/lyrics/parse-lrc   {text}         LRC 文字 → 句子與時間
+GET    /api/songs/{slug}/lyrics               這首歌存好的歌詞（沒有回傳 null）＋猜的歌名
+PUT    /api/songs/{slug}/lyrics {lines, offset, source, lang?, lrclib?}  存歌詞（對時間畫面自動存）
+DELETE /api/songs/{slug}/lyrics               刪掉歌詞，重新選來源
+GET    /api/align/status                      AI 對時間元件與模型是否就緒
+POST   /api/songs/{slug}/align {text, lang?}  開始 AI 對時間 → {job}
+GET    /api/align-jobs/{id}                   對時間進度
+POST   /api/align-jobs/{id}/cancel            取消
 """
 
 from __future__ import annotations
@@ -44,7 +55,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, beats, config, export, ffmpeg, pipeline, separate, updater
+from . import __version__, align, beats, config, export, ffmpeg, lyrics, pipeline, separate, updater
 from .hardware import detect_device
 from .mix import MixError
 from .project import STEM_NAMES, Song, list_songs, slugify
@@ -79,7 +90,16 @@ def song_summary(s: Song) -> dict:
         "renders": s.meta.get("renders", [])[-10:],
         "outDir": str(s.out_dir),
         "cacheBytes": s.cache_bytes(),
+        "lyricsLines": _lyrics_count(s),
     }
+
+
+def _lyrics_count(s: Song) -> int:
+    p = lyrics.lyrics_path(s)
+    if not p.exists():
+        return 0
+    data = lyrics.load(s)
+    return len(data["lines"]) if data else 0
 
 
 def get_song(slug: str) -> Song:
@@ -186,6 +206,46 @@ def start_job(source: Path, mode: str) -> Job:
     return job
 
 
+# ------------------------------------------------------------------ AI 對時間工作（第 4 批）
+@dataclass
+class AlignJob:
+    id: str
+    slug: str
+    state: str = "running"           # running / done / error / cancelled
+    stage: str = "prepare"           # prepare / download / load / align / save
+    progress: float = 0.0
+    message: str = "準備中…"
+    started: float = field(default_factory=time.time)
+    finished: Optional[float] = None
+    error: Optional[str] = None
+    lyrics: Optional[dict] = None
+    _cancel: align.CancelToken = field(default_factory=align.CancelToken, repr=False)
+
+    def public(self) -> dict:
+        d = {f: getattr(self, f) for f in self.__dataclass_fields__ if not f.startswith("_")}
+        d["elapsed"] = round((self.finished or time.time()) - self.started, 1)
+        return d
+
+
+ALIGN_JOBS: dict[str, AlignJob] = {}
+
+
+def _run_align(job: AlignJob, song: Song, text: str, lang: Optional[str]) -> None:
+    def on_progress(stage: str, pct: float, msg: str) -> None:
+        job.stage, job.progress, job.message = stage, round(pct, 1), msg
+
+    try:
+        job.lyrics = align.align_song(song, text, lang=lang, progress=on_progress, cancel=job._cancel)
+        job.state, job.progress, job.message = "done", 100.0, "完成"
+    except align.Cancelled:
+        job.state, job.message = "cancelled", "已取消"
+    except Exception as e:  # noqa: BLE001 — 任何錯誤都要回報到畫面上
+        logging.exception("AI 對時間失敗")
+        job.state, job.error = "error", str(e)
+    finally:
+        job.finished = time.time()
+
+
 # ------------------------------------------------------------------ API
 class AnalyzeBody(BaseModel):
     path: str
@@ -228,11 +288,34 @@ class SettingsBody(BaseModel):
     outDir: Optional[str] = None
 
 
+class LrcBody(BaseModel):
+    text: str
+
+
+class LyricLine(BaseModel):
+    t: float
+    end: Optional[float] = None
+    text: str
+
+
+class LyricsBody(BaseModel):
+    lines: list[LyricLine]
+    offset: float = 0.0
+    source: str = "manual"
+    lang: Optional[str] = None
+    lrclib: Optional[dict] = None
+
+
+class AlignBody(BaseModel):
+    text: str
+    lang: Optional[str] = None
+
+
 def create_app() -> FastAPI:
     from .hardware import warm_up
     warm_up()   # 背景先查顯卡（子程序，幾秒），第一次開畫面時多半已經查好
     app = FastAPI(title="DENKI 伴奏工具", version=__version__)
-    updater.busy_check = lambda: any(j.state == "running" for j in JOBS.values())
+    updater.busy_check = lambda: any(j.state == "running" for j in [*JOBS.values(), *ALIGN_JOBS.values()])
     if os.environ.get("DENKI_UPDATE_AUTO", "1") != "0" and updater.enabled()[0]:
         updater.check_in_background()   # 開啟時自動檢查（背景，連不上網也不影響）
 
@@ -451,6 +534,78 @@ def create_app() -> FastAPI:
     def update_ack():
         updater.ack_result()
         return {"ok": True}
+
+    # ---------------- 第 4 批：歌詞與對時間
+    @app.get("/api/lyrics/search")
+    def lyrics_search(title: str, artist: str = "", duration: Optional[float] = None):
+        try:
+            return {"results": lyrics.search_lrclib(title, artist, duration)}
+        except lyrics.LyricsError as e:
+            raise HTTPException(502, str(e)) from e
+
+    @app.post("/api/lyrics/parse-lrc")
+    def parse_lrc(body: LrcBody):
+        lines = lyrics.parse_lrc(body.text)
+        if not lines:
+            raise HTTPException(400, "這個檔案裡找不到附時間的歌詞（LRC 格式像 [00:12.34]歌詞）。")
+        return {"lines": lines, "lang": lyrics.detect_language(" ".join(ln["text"] for ln in lines))}
+
+    @app.get("/api/songs/{slug}/lyrics")
+    def get_lyrics(slug: str):
+        s = get_song(slug)
+        return {"lyrics": lyrics.load(s), "titleGuess": lyrics.guess_title(s.title)}
+
+    @app.put("/api/songs/{slug}/lyrics")
+    def put_lyrics(slug: str, body: LyricsBody):
+        s = get_song(slug)
+        try:
+            return lyrics.save(s, [ln.model_dump() for ln in body.lines], source=body.source,
+                               offset=body.offset, lang=body.lang, lrclib=body.lrclib)
+        except lyrics.LyricsError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.delete("/api/songs/{slug}/lyrics")
+    def del_lyrics(slug: str):
+        lyrics.delete(get_song(slug))
+        return {"ok": True}
+
+    @app.get("/api/align/status")
+    def align_status():
+        return {**align.status(), "device": detect_device()["device"]}
+
+    @app.post("/api/songs/{slug}/align")
+    def start_align(slug: str, body: AlignBody):
+        s = get_song(slug)
+        if not lyrics.split_plain(body.text):
+            raise HTTPException(400, "歌詞是空的：請貼上歌詞，一行一句。")
+        try:
+            align.vocals_for(s)
+        except align.AlignError as e:
+            raise HTTPException(400, str(e)) from e
+        for j in ALIGN_JOBS.values():
+            if j.state == "running":
+                if j.slug == slug:
+                    return j.public()
+                raise HTTPException(409, "另一首歌正在對時間，請等它完成。")
+        job = AlignJob(id=uuid.uuid4().hex[:10], slug=slug)
+        ALIGN_JOBS[job.id] = job
+        threading.Thread(target=_run_align, args=(job, s, body.text, body.lang), daemon=True).start()
+        return job.public()
+
+    @app.get("/api/align-jobs/{job_id}")
+    def align_job(job_id: str):
+        j = ALIGN_JOBS.get(job_id)
+        if not j:
+            raise HTTPException(404, "找不到這個工作")
+        return j.public()
+
+    @app.post("/api/align-jobs/{job_id}/cancel")
+    def align_cancel(job_id: str):
+        j = ALIGN_JOBS.get(job_id)
+        if not j:
+            raise HTTPException(404, "找不到這個工作")
+        j._cancel.cancel()
+        return j.public()
 
     @app.exception_handler(HTTPException)
     async def http_error(_: Request, exc: HTTPException):

@@ -1,7 +1,7 @@
 # DENKI 伴奏工具
 
 把一首歌（音檔或影片）丟進去 → AI 去人聲 → 調 Key、調導唱 → 輸出伴唱檔。
-之後會加上卡拉OK 字幕影片（第二期）。
+第二期：卡拉OK 字幕影片（第 4 批：抓歌詞與對時間；第 5 批：字幕樣式與輸出 MP4）。
 
 完整規格、架構與交接備忘在 Notion：「AI 開發專案管理」→「DENKI 伴奏工具」。
 
@@ -13,8 +13,8 @@
   python\             ← Python 3.11.9 嵌入式版本（安裝程式放的，不動到電腦上其他 Python）
   venv\               ← 舊的開發環境（第 0～2 批），有 python\ 之後就用不到
   ffmpeg\bin\         ← FFmpeg（含 rubberband）
-  models\             ← AI 模型（RoFormer 在這裡，Demucs 在 models\torch）
-  songs\              ← 每首歌一個資料夾：中間檔 stems\ 與輸出 out\
+  models\             ← AI 模型（RoFormer 在這裡，Demucs 在 models\torch，對時間的 Whisper 在 models\whisper，第一次用到才下載）
+  songs\              ← 每首歌一個資料夾：中間檔 stems\、輸出 out\、歌詞 lyrics.json（清除中間檔不會刪）
   _update\            ← 程式內更新的暫存、舊版備份（backup\）、update.log
   結果.txt  app.log  install-log.txt  解除安裝.bat
 ```
@@ -46,6 +46,17 @@
 4. 右上角「分離模式」可以切換比較（沒分析過的模式會就地分析，之後秒切）
 5. 一開始就進歌的曲子：勾「預備拍」（鼓棒互敲，1 或 2 小節），可以試聽、微調第一拍、點拍抓速度
 6. 選格式 →「輸出這個版本」（音量補償預設開啟）
+
+### 卡拉影片（第二期，第 4 批）
+
+上方切到「卡拉影片」分頁：
+
+1. 左邊選一首分析過的歌（對時間要用到分離出的人聲）
+2. 歌詞三種來源：**LRCLIB 搜尋**（歌名從檔名猜好）、**貼上歌詞**（AI 聽人聲自動對時間；也可以不用 AI 自己點）、**匯入 LRC 檔**
+3. 對時間：整體前後移滑桿（±10 秒）＋單句 ±0.1 秒、「設成現在」；播放中按空白鍵＝把選取的句子設成現在並跳下一句；Ctrl+Z 復原；自動儲存
+4. 字幕樣式與輸出 MP4 是第 5 批
+
+AI 對時間用 stable-ts（Whisper medium，約 1.5 GB，第一次用到才下載到 models\whisper）。
 
 ### 預備拍（2.3）
 
@@ -109,12 +120,15 @@ karaoke/
   deps.py       照鎖定清單安裝／核對套件（安裝程式、更新、更新並測試共用）
   updater.py    程式內更新：問 GitHub Releases、下載核對、交給小幫手
   update_helper.py  更新小幫手（只用內建功能）：換版、補套件、檢查、失敗換回、重新開啟
+  lyrics.py     卡拉影片的歌詞：LRCLIB 搜尋、LRC 解析／輸出、lyrics.json、AI 逐字時間對應回每一句
+  align.py      AI 對時間：下載 Whisper 模型（核對 SHA-256）、在子程序跑 align_worker.py
 installer/      安裝程式（install.ps1、uninstall.ps1、安裝.bat、圖示、打包腳本）
-wheels/         PyPI 上只有原始碼的套件，預先打包（proxy-tools）
+wheels/         PyPI 上只有原始碼的套件，預先打包（proxy-tools、openai-whisper、stable-ts）
 ui/             介面原始碼（React + Vite + TypeScript）
   dist/         編譯好的介面（已放進 repo，Windows 端不需要 Node）
   src/audio/engine.ts   預覽播放引擎：Signalsmith Stretch 即時變調
-tests/selftest.py   合成音自動測試 + 真實歌曲測試 + 介面檢查 + 安裝與更新檢查
+  src/karaoke/  卡拉影片分頁（lyricsView.ts＝字幕顯示規則：兩行交替、提前顯示、間奏倒數、整句均分掃色）
+tests/selftest.py   合成音自動測試 + 真實歌曲測試 + 介面檢查 + 安裝與更新檢查（歌詞與對時間在 lyrics_selftest.py）
 ```
 
 ### 修改介面

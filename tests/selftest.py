@@ -562,6 +562,13 @@ def main() -> int:
         r.fail("合成音測試中斷", str(e))
         r.info(traceback.format_exc()[-1500:])
 
+    try:
+        from tests.lyrics_selftest import lyrics_tests
+        lyrics_tests(r, make_test_video)
+    except Exception as e:  # noqa: BLE001
+        r.fail("歌詞與對時間測試中斷", str(e))
+        r.info(traceback.format_exc()[-1500:])
+
     if args.real:
         real_test(r)
 

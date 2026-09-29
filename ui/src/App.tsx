@@ -5,6 +5,7 @@ import LoadScreen from './screens/LoadScreen'
 import AnalyzeScreen from './screens/AnalyzeScreen'
 import PreviewScreen, { defaultSettings, type PreviewSettings } from './screens/PreviewScreen'
 import DoneScreen from './screens/DoneScreen'
+import KaraokeTab from './karaoke/KaraokeTab'
 import { UpdateDialog, UpdateFooter, UpdatePill, UpdateResult, useUpdate } from './Update'
 
 type Screen =
@@ -23,6 +24,7 @@ export default function App() {
   const [settings, setSettings] = useState<PreviewSettings>(defaultSettings)
   const upd = useUpdate()
   const [showUpdate, setShowUpdate] = useState(false)
+  const [tab, setTab] = useState<'accomp' | 'karaoke'>('accomp')
 
   useEffect(() => { api.status().then(setStatus).catch(() => setStatus(null)) }, [])
 
@@ -50,8 +52,12 @@ export default function App() {
       <header className="topbar">
         <div className="brand">DENKI 伴奏工具</div>
         <nav className="tabs">
-          <button className="tab on">伴奏處理</button>
-          <button className="tab" disabled title="第二期">卡拉影片（第二期）</button>
+          <button className={`tab ${tab === 'accomp' ? 'on' : ''}`} onClick={() => setTab('accomp')}>伴奏處理</button>
+          <button className={`tab ${tab === 'karaoke' ? 'on' : ''}`}
+            onClick={() => { engine.current?.engine.pause(); setTab('karaoke') }}
+            disabled={screen.name === 'analyze'} title={screen.name === 'analyze' ? '分析完成後再切換' : undefined}>
+            卡拉影片
+          </button>
         </nav>
         <div className="spacer" />
         <UpdatePill info={upd.info} onClick={() => setShowUpdate(true)} />
@@ -67,7 +73,8 @@ export default function App() {
         if (upd.info) upd.setInfo({ ...upd.info, lastResult: null })
       }} />
 
-      {screen.name === 'load' && (
+      {tab === 'karaoke' && <KaraokeTab onGoAccomp={() => { setTab('accomp'); goHome() }} />}
+      {tab === 'accomp' && screen.name === 'load' && (
         <LoadScreen
           error={screen.error}
           status={status}
@@ -75,7 +82,7 @@ export default function App() {
           onOpen={openSong}
         />
       )}
-      {screen.name === 'analyze' && (
+      {tab === 'accomp' && screen.name === 'analyze' && (
         <AnalyzeScreen
           job={screen.job}
           status={status}
@@ -83,7 +90,7 @@ export default function App() {
           onBack={goHome}
         />
       )}
-      {screen.name === 'preview' && (
+      {tab === 'accomp' && screen.name === 'preview' && (
         <PreviewScreen
           key={screen.slug}
           slug={screen.slug}
@@ -95,7 +102,7 @@ export default function App() {
           onRendered={(result, seconds) => setScreen({ name: 'done', slug: screen.slug, result, seconds })}
         />
       )}
-      {screen.name === 'done' && (
+      {tab === 'accomp' && screen.name === 'done' && (
         <DoneScreen
           result={screen.result}
           seconds={screen.seconds}
@@ -103,7 +110,7 @@ export default function App() {
           onNext={() => goHome()}
         />
       )}
-      {screen.name === 'load' && (
+      {(tab === 'karaoke' || screen.name === 'load') && (
         <UpdateFooter info={upd.info} checking={upd.checking} onCheck={upd.refresh} onOpen={() => setShowUpdate(true)} />
       )}
       {showUpdate && upd.info?.latest && (

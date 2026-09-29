@@ -9,3 +9,6 @@ uvicorn>=0.29
 pywebview>=5.0
 # 第 2.3 批：預備拍（偵測速度與第一拍）
 librosa
+# 第 4 批：AI 對時間（模型第一次用到才下載）
+stable-ts
+openai-whisper

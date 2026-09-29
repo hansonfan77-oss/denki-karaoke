@@ -50,6 +50,43 @@ export interface Song {
   renders: RenderRecord[]
   outDir: string
   cacheBytes: number
+  lyricsLines?: number
+}
+
+// ---------------- 第 4 批：卡拉影片（歌詞與對時間）
+export interface LyricLine { t: number; end: number | null; text: string }
+export type LyricsSource = 'lrclib' | 'ai' | 'lrc' | 'manual'
+export interface Lyrics {
+  source: LyricsSource
+  lang: string
+  offset: number
+  lines: LyricLine[]
+  lrclib?: { id: number; trackName: string; artistName: string } | null
+  updated_at?: string
+}
+export interface LrclibResult {
+  id: number
+  trackName: string
+  artistName: string
+  albumName: string
+  duration: number | null
+  durationDiff: number | null
+  instrumental: boolean
+  synced: boolean
+  lines: LyricLine[]
+  plain: string
+}
+export interface AlignStatus { packages: boolean; model: boolean; modelBytes: number; modelName: string; device: 'cuda' | 'cpu' }
+export interface AlignJob {
+  id: string
+  slug: string
+  state: 'running' | 'done' | 'error' | 'cancelled'
+  stage: 'prepare' | 'download' | 'load' | 'align' | 'save'
+  progress: number
+  message: string
+  elapsed: number
+  error: string | null
+  lyrics: Lyrics | null
 }
 
 export interface Job {
@@ -147,6 +184,18 @@ export const api = {
   update: (refresh = false) => call<UpdateInfo>(`api/update${refresh ? '?refresh=1' : ''}`),
   startUpdate: () => call<UpdateInfo>('api/update/start', { method: 'POST' }),
   ackUpdate: () => call<{ ok: boolean }>('api/update/ack', { method: 'POST' }),
+  // 第 4 批
+  lyrics: (slug: string) => call<{ lyrics: Lyrics | null; titleGuess: string }>(`api/songs/${enc(slug)}/lyrics`),
+  saveLyrics: (slug: string, body: { lines: LyricLine[]; offset: number; source: LyricsSource; lang?: string; lrclib?: Lyrics['lrclib'] }) =>
+    call<Lyrics>(`api/songs/${enc(slug)}/lyrics`, json(body, 'PUT')),
+  deleteLyrics: (slug: string) => call<{ ok: boolean }>(`api/songs/${enc(slug)}/lyrics`, { method: 'DELETE' }),
+  searchLyrics: (title: string, artist: string, duration: number | null) =>
+    call<{ results: LrclibResult[] }>(`api/lyrics/search?title=${enc(title)}&artist=${enc(artist)}${duration ? `&duration=${duration}` : ''}`),
+  parseLrc: (text: string) => call<{ lines: LyricLine[]; lang: string }>('api/lyrics/parse-lrc', json({ text })),
+  alignStatus: () => call<AlignStatus>('api/align/status'),
+  align: (slug: string, text: string, lang?: string) => call<AlignJob>(`api/songs/${enc(slug)}/align`, json({ text, lang })),
+  alignJob: (id: string) => call<AlignJob>(`api/align-jobs/${id}`),
+  cancelAlign: (id: string) => call<AlignJob>(`api/align-jobs/${id}/cancel`, { method: 'POST' }),
 }
 
 export const stemUrl = (slug: string, mode: ModeId, name: 'no_vocals' | 'vocals') =>
