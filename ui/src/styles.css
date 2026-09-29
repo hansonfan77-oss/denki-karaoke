@@ -342,3 +342,4 @@ h1 { margin: 0; font-size: 22px; }
 .kx-foot { display: flex; align-items: center; gap: 10px; padding-top: 6px; }
 .ksty-body > * { flex-shrink: 0; }
 .ksty .swatch { width: 26px; height: 26px; }
+.kt-alignall { align-self: flex-start; }

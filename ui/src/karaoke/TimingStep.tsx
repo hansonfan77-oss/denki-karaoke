@@ -6,7 +6,7 @@ import { Pause, Play } from '../icons'
 import LyricsStage from './LyricsStage'
 import { fmtOffset, fmtStamp, setStart, SOURCE_LABEL, stageAt, timed } from './lyricsView'
 
-const OFFSET_MAX = 10
+const OFFSET_MAX = 60   // 找到的歌詞版本跟影片差很多（例如 MV 有長前奏）時也夠用
 const UNDO_MAX = 60
 
 type Snapshot = { lines: LyricLine[]; offset: number }
@@ -79,7 +79,7 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
     const el = leftRef.current
     if (!el) return
     // 寬度跟著欄寬，但高度要留空間給下面的播放列與滑桿（約 260px）
-    const fit = () => setStageW(Math.max(320, Math.floor(Math.min(el.clientWidth, ((el.clientHeight - 262) * 16) / 9))))
+    const fit = () => setStageW(Math.max(320, Math.floor(Math.min(el.clientWidth, ((el.clientHeight - 300) * 16) / 9))))
     const ro = new ResizeObserver(fit)
     ro.observe(el)
     return () => ro.disconnect()
@@ -109,6 +109,13 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
     const { pos: p, offset: o } = state.current
     edit({ lines: setStart(state.current.lines, i, p - o) })
   }, [edit])
+
+  /** 整首一起移：算出位移量，讓選取的句子剛好在「現在」開始（歌詞版本跟影片差十幾秒時最快） */
+  const alignAllToNow = () => {
+    const { pos: p, sel: i, lines: ls } = state.current
+    if (!ls[i]) return
+    edit({ offset: Math.round((p - ls[i].t) * 100) / 100 })
+  }
 
   const deleteLine = (i: number) => {
     if (state.current.lines.length <= 1) return
@@ -275,6 +282,10 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
             <div className="slider-foot"><span>字幕提早</span>
               <button className="linkbtn" onClick={() => edit({ offset: 0 })} disabled={offset === 0}>歸零</button>
               <span>字幕延後</span></div>
+            <button className="btn sm kt-alignall" disabled={!engine} onClick={alignAllToNow}
+              title="播放到歌手開始唱「選取的那一句」時按下：整首歌詞一起移動，讓這句剛好對上">
+              整首對齊：選取的句子＝現在
+            </button>
           </div>
           <div className="card kt-guide">
             <div className="slider-head"><b className="kt-h">原唱音量</b><b className="kt-val">{guide}%</b></div>

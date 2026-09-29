@@ -31,7 +31,7 @@ from .project import Song, now_iso
 LRCLIB_API = os.environ.get("DENKI_LRCLIB_API", "https://lrclib.net/api").rstrip("/")
 USER_AGENT = f"DENKI-karaoke/{__version__} (https://github.com/{config.GITHUB_REPO})"
 SOURCES = ("lrclib", "ai", "lrc", "manual")
-OFFSET_LIMIT = 30.0
+OFFSET_LIMIT = 60.0
 
 
 class LyricsError(RuntimeError):
