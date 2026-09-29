@@ -22,8 +22,16 @@ class FFmpegError(RuntimeError):
 
 
 def _candidates(name: str) -> list[str]:
+    from . import config
+
+    out: list[str] = []
+    # 安裝程式放在安裝資料夾裡的 FFmpeg 優先（可攜、版本固定、一定有 rubberband）
+    for exe in (config.FFMPEG_DIR / f"{name}.exe", config.FFMPEG_DIR / name):
+        if exe.is_file():
+            out.append(str(exe))
     found = shutil.which(name)
-    out = [found] if found else []
+    if found:
+        out.append(found)
     # winget 安裝的 FFmpeg 在剛裝完、PATH 還沒刷新時，shutil.which 可能找不到
     local = os.environ.get("LOCALAPPDATA")
     if local:
@@ -41,7 +49,7 @@ def find(name: str = "ffmpeg") -> str:
     for c in _candidates(name):
         if c:
             return c
-    raise FFmpegError(f"找不到 {name}。請先執行 setup.ps1，或用 winget install Gyan.FFmpeg 安裝。")
+    raise FFmpegError(f"找不到 {name}。請重新執行「安裝.bat」（會自動補裝 FFmpeg）。")
 
 
 def run(args: list[str], *, quiet: bool = True) -> None:

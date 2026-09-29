@@ -322,7 +322,7 @@ export default function PreviewScreen({ slug, status, engineRef, settings, onSet
               ? (modeJob.stage === 'separate' && modeJob.progress > 0 ? `分析中 ${Math.floor(modeJob.progress)}%` : '準備中…')
               : analyzed ? '已分析'
                 : unavailable ? '需要顯卡'
-                  : m === 'standard' ? '約 30 秒' : '約 1 分鐘'
+                  : m === 'standard' ? '約 30 秒' : '約 2 分鐘'
             return (
               <button key={m} role="radio" aria-checked={mode === m}
                 className={`mode ${mode === m ? 'on' : ''} ${running ? 'running' : ''}`}

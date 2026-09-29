@@ -1,3 +1,4 @@
+# ⚠️ 安裝一律照 requirements-lock.txt（確切版本，python -m karaoke.deps）。這份只記錄「直接用到哪些套件」。
 # 高品質／保留和聲模式（audio-separator）要用的套件。
 # audio-separator 本體用 --no-deps 另外裝（見 update_and_test.ps1），原因：
 #   它的相依 diffq 沒有 Python 3.11 的 Windows 版本，安裝時會要求 C++ 編譯器而失敗；

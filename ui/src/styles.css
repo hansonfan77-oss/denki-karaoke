@@ -176,3 +176,24 @@ h1 { margin: 0; font-size: 22px; }
 /* 上傳進度（2.3.2） */
 .upload-prog { width: 420px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
 .upload-prog .bar { width: 100%; }
+
+/* ---------------- 程式內更新（第 3 批） */
+.update-pill { border: 0; background: var(--accent); color: #fff; font-weight: 700; box-shadow: 0 0 0 4px var(--accent-track); }
+.update-pill .dot { background: #E8B931; }
+.update-pill:hover { background: var(--accent-dark); }
+.footbar { flex: none; height: 32px; padding: 0 24px; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.modal-back { position: fixed; inset: 0; background: rgba(30, 29, 26, .35); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { width: 520px; max-width: calc(100vw - 32px); max-height: calc(100vh - 48px); overflow: auto; padding: 24px 26px;
+  background: var(--card); border-radius: 16px; box-shadow: 0 16px 48px rgba(0,0,0,.25); display: flex; flex-direction: column; gap: 14px; }
+.modal h2 { margin: 0; font-size: 19px; }
+.modal .accent { color: var(--accent-dark); }
+.modal .notes { background: var(--bg); border-radius: 10px; padding: 10px 16px; line-height: 1.7; user-select: text; }
+.modal .notes ul { margin: 4px 0; padding-left: 20px; }
+.modal .notes p { margin: 4px 0; }
+.modal-btns { display: flex; justify-content: flex-end; gap: 10px; }
+.ustep { display: flex; align-items: center; gap: 12px; }
+.ustep .mark { width: 24px; height: 24px; }
+.update-result { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 24px; font-size: 13px; }
+.update-result.ok { background: var(--accent-soft); color: var(--accent-dark); }
+.update-result.bad { background: var(--error-bg); color: var(--error-text); }
+.update-result span { flex: 1; }

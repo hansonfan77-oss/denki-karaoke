@@ -68,6 +68,23 @@ export interface Job {
   device: string
 }
 
+/** 程式內更新（第 3 批） */
+export interface UpdateInfo {
+  current: string
+  state: 'idle' | 'checking' | 'downloading' | 'installing' | 'restarting' | 'error'
+  available: boolean
+  latest: { tag: string; version: string; notes: string; published: string } | null
+  checkedAt: number | null
+  error: string | null
+  bytes: number
+  total: number | null
+  depsTodo: string[] | null
+  torchChange: boolean
+  enabled: boolean
+  disabledReason: string
+  lastResult: { ok: boolean; from: string; to: string; message: string; at: string } | null
+}
+
 export interface RenderFile { path: string; name: string; size: number; kind: 'video' | 'audio' }
 export interface RenderResult { files: RenderFile[]; outDir: string | null }
 export type OutFormat = 'video' | 'mp3' | 'wav'
@@ -127,6 +144,9 @@ export const api = {
   settings: () => call<{ outDir?: string | null }>('api/settings'),
   setOutDir: (outDir: string | null) => call<{ outDir?: string | null }>('api/settings', json({ outDir })),
   open: (path: string) => call<{ ok: boolean }>('api/open', json({ path })),
+  update: (refresh = false) => call<UpdateInfo>(`api/update${refresh ? '?refresh=1' : ''}`),
+  startUpdate: () => call<UpdateInfo>('api/update/start', { method: 'POST' }),
+  ackUpdate: () => call<{ ok: boolean }>('api/update/ack', { method: 'POST' }),
 }
 
 export const stemUrl = (slug: string, mode: ModeId, name: 'no_vocals' | 'vocals') =>

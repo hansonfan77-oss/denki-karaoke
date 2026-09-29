@@ -20,6 +20,9 @@ DELETE /api/songs/{slug}/cache                清除一首歌的中間檔
 DELETE /api/cache                             清除全部中間檔
 GET/POST /api/settings                        輸出資料夾等設定
 POST   /api/open               {path}         用系統開啟檔案或資料夾
+GET    /api/update?refresh=1                  更新狀態（refresh=1 立刻問 GitHub）
+POST   /api/update/start                      下載新版並交給更新小幫手（伴奏工具會自動關掉再開）
+POST   /api/update/ack                        上次更新的結果已經顯示過了
 """
 
 from __future__ import annotations
@@ -41,7 +44,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, beats, config, export, ffmpeg, pipeline, separate
+from . import __version__, beats, config, export, ffmpeg, pipeline, separate, updater
 from .hardware import detect_device
 from .mix import MixError
 from .project import STEM_NAMES, Song, list_songs, slugify
@@ -229,6 +232,9 @@ def create_app() -> FastAPI:
     from .hardware import warm_up
     warm_up()   # 背景先查顯卡（子程序，幾秒），第一次開畫面時多半已經查好
     app = FastAPI(title="DENKI 伴奏工具", version=__version__)
+    updater.busy_check = lambda: any(j.state == "running" for j in JOBS.values())
+    if os.environ.get("DENKI_UPDATE_AUTO", "1") != "0" and updater.enabled()[0]:
+        updater.check_in_background()   # 開啟時自動檢查（背景，連不上網也不影響）
 
     @app.get("/api/status")
     def status():
@@ -426,6 +432,24 @@ def create_app() -> FastAPI:
             subprocess.Popen(["open", str(p)])
         else:
             subprocess.Popen(["xdg-open", str(p)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"ok": True}
+
+    @app.get("/api/update")
+    def update_status(refresh: bool = False):
+        if refresh and updater.enabled()[0]:
+            return updater.check()
+        return updater.public()
+
+    @app.post("/api/update/start")
+    def update_start():
+        try:
+            return updater.start()
+        except RuntimeError as e:
+            raise HTTPException(409, str(e)) from e
+
+    @app.post("/api/update/ack")
+    def update_ack():
+        updater.ack_result()
         return {"ok": True}
 
     @app.exception_handler(HTTPException)

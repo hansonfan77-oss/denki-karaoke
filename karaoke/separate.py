@@ -122,10 +122,29 @@ def _separate_demucs(src: Path, no_vocals: Path, vocals: Path, model: str, devic
         shutil.move(str(found_v[0]), vocals)
 
 
+def torch_home() -> str:
+    """Demucs 的模型也放進安裝資料夾（models\\torch），不再放使用者資料夾的 .cache：
+    整個資料夾搬走（隨身碟）或解除安裝都乾淨。第一次會把舊位置已下載的模型搬過來，不用重新下載。"""
+    if os.environ.get("TORCH_HOME"):
+        return os.environ["TORCH_HOME"]
+    new = config.MODELS_DIR / "torch"
+    ckpt = new / "hub" / "checkpoints"
+    if not ckpt.exists():
+        old = Path.home() / ".cache" / "torch" / "hub" / "checkpoints"
+        try:
+            ckpt.mkdir(parents=True, exist_ok=True)
+            if old.is_dir():
+                for f in old.glob("*.th"):
+                    shutil.copy2(f, ckpt / f.name)
+        except OSError:
+            pass
+    return str(new)
+
+
 def _run_with_progress(cmd: list[str], model: str, progress: Progress,
                        cancel: Optional[CancelToken]) -> tuple[int, str]:
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0  # pythonw 下不要跳出黑視窗
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", "TORCH_HOME": torch_home()}
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                             creationflags=flags, env=env)
     if cancel:

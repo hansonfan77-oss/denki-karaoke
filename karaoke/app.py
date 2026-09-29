@@ -137,6 +137,8 @@ def main() -> int:
             width=1120, height=780, min_size=(960, 680),
         )
         api._window = window
+        from . import updater
+        updater.shutdown_hook = window.destroy   # 程式內更新：關掉視窗，交給更新小幫手
         from . import watchdog
         watchdog.start(config.ROOT / "freeze.log", "DENKI 伴奏工具")
         # 一定要在背景執行緒做，才不會擋到視窗

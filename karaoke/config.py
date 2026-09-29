@@ -1,7 +1,14 @@
 """全域設定：路徑、支援的格式、分離模式、預設值。
 
-工作區根目錄預設是 C:\\denki-karaoke，可用環境變數 DENKI_KARAOKE_HOME 覆蓋
-（雲端測試時就是用這個指到暫存資料夾）。
+路徑一律從「程式自己的位置」推算，不寫死 C 槽（第 3 批起）：
+    <安裝資料夾>\\
+      app\\        ← 這份程式（APP_DIR）
+      python\\     ← 安裝程式放的 Python（嵌入式，可攜）
+      venv\\       ← 舊的開發環境（第 0～2 批用 setup.ps1 裝的）
+      ffmpeg\\bin\\ ← 安裝程式放的 FFmpeg
+      songs\\  models\\  settings.json  app.log
+所以整個資料夾搬到別的磁碟或隨身碟也能用。
+可用環境變數 DENKI_KARAOKE_HOME 覆蓋（雲端測試就是用這個指到暫存資料夾）。
 """
 
 from __future__ import annotations
@@ -9,9 +16,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-ROOT = Path(os.environ.get("DENKI_KARAOKE_HOME", r"C:\denki-karaoke"))
+APP_DIR = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ["DENKI_KARAOKE_HOME"]) if os.environ.get("DENKI_KARAOKE_HOME") else APP_DIR.parent
 SONGS_DIR = ROOT / "songs"
 MODELS_DIR = ROOT / "models"   # audio-separator 的模型放這裡（Demucs 用自己的快取）
+FFMPEG_DIR = ROOT / "ffmpeg" / "bin"
+UPDATE_DIR = ROOT / "_update"  # 程式內更新的暫存與舊版備份
+
+# GitHub（公開 repo）：程式內更新只看「正式發佈」的版本標籤 vX.Y.Z
+GITHUB_REPO = "hansonfan77-oss/denki-karaoke"
 
 # ---------------------------------------------------------------- 分離模式
 # 每首歌可以同時保留多種模式的分離結果，介面上即時切換比較。

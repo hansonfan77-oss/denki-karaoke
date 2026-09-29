@@ -5,6 +5,7 @@ import LoadScreen from './screens/LoadScreen'
 import AnalyzeScreen from './screens/AnalyzeScreen'
 import PreviewScreen, { defaultSettings, type PreviewSettings } from './screens/PreviewScreen'
 import DoneScreen from './screens/DoneScreen'
+import { UpdateDialog, UpdateFooter, UpdatePill, UpdateResult, useUpdate } from './Update'
 
 type Screen =
   | { name: 'load'; error?: string }
@@ -20,6 +21,8 @@ export default function App() {
   // 預覽引擎與設定放在這一層：從「完成」回去再調一版時，不用重新載入、設定也還在
   const engine = useRef<EngineRef>(null)
   const [settings, setSettings] = useState<PreviewSettings>(defaultSettings)
+  const upd = useUpdate()
+  const [showUpdate, setShowUpdate] = useState(false)
 
   useEffect(() => { api.status().then(setStatus).catch(() => setStatus(null)) }, [])
 
@@ -51,6 +54,7 @@ export default function App() {
           <button className="tab" disabled title="第二期">卡拉影片（第二期）</button>
         </nav>
         <div className="spacer" />
+        <UpdatePill info={upd.info} onClick={() => setShowUpdate(true)} />
         {status && (
           <div className={`pill ${status.device === 'cuda' ? '' : 'cpu'}`} title={status.deviceName}>
             <span className="dot" />
@@ -58,6 +62,10 @@ export default function App() {
           </div>
         )}
       </header>
+      <UpdateResult info={upd.info} onAck={() => {
+        api.ackUpdate().catch(() => {})
+        if (upd.info) upd.setInfo({ ...upd.info, lastResult: null })
+      }} />
 
       {screen.name === 'load' && (
         <LoadScreen
@@ -94,6 +102,15 @@ export default function App() {
           onAgain={() => setScreen({ name: 'preview', slug: screen.slug })}
           onNext={() => goHome()}
         />
+      )}
+      {screen.name === 'load' && (
+        <UpdateFooter info={upd.info} checking={upd.checking} onCheck={upd.refresh} onOpen={() => setShowUpdate(true)} />
+      )}
+      {showUpdate && upd.info?.latest && (
+        <UpdateDialog info={upd.info} setInfo={upd.setInfo} onClose={() => {
+          setShowUpdate(false)
+          if (upd.info?.state === 'error') upd.refresh()
+        }} />
       )}
     </div>
   )

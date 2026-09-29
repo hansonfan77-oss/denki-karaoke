@@ -17,6 +17,7 @@ B. 真實歌曲測試（加 --real，在有 Demucs 的電腦上跑）
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import tempfile
@@ -471,6 +472,68 @@ def ui_tests(r: Report) -> None:
             "都放到子程序" if out.endswith("False False") else f"torch、librosa 載入狀態：{out}")
 
 
+# ------------------------------------------------------------------ D
+def install_tests(r: Report) -> None:
+    """第 3 批：安裝程式、可攜路徑、程式內更新。"""
+    import zipfile
+
+    from karaoke import deps, updater
+
+    r.info("")
+    r.info("【D. 安裝與更新】")
+    r.info(f"安裝資料夾：{config.ROOT}（Python：{sys.executable}）")
+    if not os.environ.get("DENKI_KARAOKE_HOME"):
+        r.check("路徑跟著程式走（可攜）", config.ROOT == config.APP_DIR.parent, f"{config.APP_DIR} → {config.ROOT}")
+    if sys.platform == "win32":
+        bad = deps.check()
+        r.check("套件版本和鎖定清單一致", not bad,
+                f"{len(deps.read_lock()) + 2} 個都正確" if not bad else "；".join(bad[:5]) + "（請點 更新並測試.bat 修正）")
+        import subprocess as _sp
+        from karaoke.proc import NO_WINDOW
+        out = _sp.run([sys.executable, "-c", "import pythonnet; pythonnet.load(); import clr; print('ok')"],
+                      capture_output=True, text=True, **NO_WINDOW)
+        r.check("視窗元件（.NET）可以載入", out.stdout.strip().endswith("ok"), (out.stderr or out.stdout).strip()[-200:] or "OK")
+        r.check("WebView2 執行階段", _webview2_version() is not None, _webview2_version() or "沒有安裝（請重新執行 安裝.bat）")
+    # 版本比較
+    cases = [("v0.3.1", "0.3.0", True), ("v0.3.0", "0.3.0", False), ("v0.10.0", "0.9.9", True),
+             ("v0.3.0", "0.2.3.4", True), ("v0.2.9", "0.3.0", False)]
+    wrong = [c for c in cases if updater.is_newer(c[0], c[1]) != c[2]]
+    r.check("更新：版本號比較", not wrong, "v0.10.0 比 0.9.9 新、v0.3.0 比 0.2.3.4 新" if not wrong else f"算錯：{wrong}")
+    # 下載的壓縮檔 → 找到程式、核對版本
+    with tempfile.TemporaryDirectory() as tmp:
+        z = Path(tmp) / "x.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            for rel in ("karaoke/__init__.py", "karaoke/app.py", "karaoke/deps.py", "requirements-lock.txt", "ui/dist/index.html"):
+                src = ROOT_DIR / rel
+                zf.write(src, f"hansonfan77-oss-denki-karaoke-abc/{rel}")
+        with zipfile.ZipFile(z) as zf:
+            zf.extractall(Path(tmp) / "new")
+        try:
+            app_new = updater.find_app_root(Path(tmp) / "new")
+            updater.verify_new_app(app_new, "v" + __version__)
+            r.ok("更新：新版壓縮檔核對", "找得到程式、版本號一致")
+        except Exception as e:  # noqa: BLE001
+            r.fail("更新：新版壓縮檔核對", str(e))
+    ok, why = updater.enabled()
+    r.info(f"  程式內更新：{'開啟' if ok else '關閉（' + why + '）'}")
+
+
+def _webview2_version():
+    import winreg
+    guid = r"{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    for hive, key in ((winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{guid}"),
+                      (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{guid}"),
+                      (winreg.HKEY_CURRENT_USER, rf"Software\Microsoft\EdgeUpdate\Clients\{guid}")):
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                v = winreg.QueryValueEx(k, "pv")[0]
+                if v and v != "0.0.0.0":
+                    return v
+        except OSError:
+            continue
+    return None
+
+
 # ------------------------------------------------------------------ main
 def main() -> int:
     for s in (sys.stdout, sys.stderr):
@@ -506,6 +569,12 @@ def main() -> int:
         ui_tests(r)
     except Exception as e:  # noqa: BLE001
         r.fail("介面檢查中斷", str(e))
+
+    try:
+        install_tests(r)
+    except Exception as e:  # noqa: BLE001
+        r.fail("安裝與更新檢查中斷", str(e))
+        r.info(traceback.format_exc()[-1500:])
 
     r.info("")
     r.info(f"總結：{r.passed} 項通過，{r.failed} 項失敗" + ("　🎉 全部通過" if r.failed == 0 else ""))

@@ -8,18 +8,33 @@
 ## 資料夾配置（Windows）
 
 ```
-C:\denki-karaoke\
-  app\        ← 這個 repo（程式）
-  venv\       ← Python 3.11 環境（setup.ps1 建立）
-  songs\      ← 每首歌一個資料夾：中間檔 stems\ 與輸出 out\
-  結果.txt    ← 最近一次自動測試的結果
+<安裝位置>\            預設 C:\denki-karaoke，整個資料夾搬到別的磁碟也能用（路徑都從程式位置推算）
+  app\                ← 這個 repo（程式）；程式內更新只換這個資料夾
+  python\             ← Python 3.11.9 嵌入式版本（安裝程式放的，不動到電腦上其他 Python）
+  venv\               ← 舊的開發環境（第 0～2 批），有 python\ 之後就用不到
+  ffmpeg\bin\         ← FFmpeg（含 rubberband）
+  models\             ← AI 模型（RoFormer 在這裡，Demucs 在 models\torch）
+  songs\              ← 每首歌一個資料夾：中間檔 stems\ 與輸出 out\
+  _update\            ← 程式內更新的暫存、舊版備份（backup\）、update.log
+  結果.txt  app.log  install-log.txt  解除安裝.bat
 ```
 
-## 第一次安裝
+## 安裝（第 3 批起）
 
-1. 把這個 repo 放到 `C:\denki-karaoke\app`
-2. 右鍵 `setup.ps1` → 用 PowerShell 執行（或在 PowerShell 貼：`powershell -ExecutionPolicy Bypass -File C:\denki-karaoke\app\setup.ps1`）
-3. 點兩下 `更新並測試.bat`，看 `結果.txt` 是不是全部通過
+1. 解壓縮「DENKI伴奏工具-vX.Y.Z-安裝.zip」，點兩下 `安裝.bat`（跳出 Windows 保護畫面就按「其他資訊 → 仍要執行」）
+2. 選安裝位置（預設 C:\denki-karaoke）→ 自動裝 Python、FFmpeg、程式、PyTorch（有 NVIDIA 顯卡裝顯卡版）、其他套件 → 自我檢查 → 建桌面與開始選單捷徑
+3. 中途失敗再點一次會從中斷的地方繼續；完整紀錄在 `install-log.txt`、`install-pip-log.txt`
+
+安裝程式本體在 `installer/install.ps1`；打包成 zip：`python installer/build_package.py`。
+
+## 更新
+
+- **正式版本：** 在 GitHub 發佈 Release（標籤 `vX.Y.Z`，要跟 `karaoke/__init__.py` 的版本號一樣；說明欄就是介面上「這次改了什麼」）。
+  每台電腦開啟時會自動檢查，右上角出現「有新版本」→ 立刻更新 → 下載 → 關閉 → 更新小幫手換版、補套件、檢查 → 重新開啟。
+  失敗會自動換回舊版。草稿與「預先發佈」不會推給店裡的電腦。
+- **套件：** 全部照 `requirements-lock.txt` 的確切版本、`--no-deps` 安裝（`python -m karaoke.deps`），PyTorch 版本在 `karaoke/deps.py`。
+  要升級套件：先在一台電腦驗證（更新並測試.bat 全過、實際分離一首歌人聲正常），再改鎖定清單。
+- **手動測試版：** 把新的 app 覆蓋上去，點 `更新並測試.bat`（照鎖定清單補套件 + 自動測試）。
 
 ## 怎麼用
 
@@ -48,7 +63,7 @@ C:\denki-karaoke\
 | 高品質 | BS-RoFormer（ep_317，SDR 12.97） | 預設（有顯卡時），樂器誤判最少 |
 | 保留和聲 | Mel-RoFormer 卡拉OK（aufr33 & viperx） | 只去主唱，和聲留在伴奏；導唱滑桿控制主唱 |
 
-高品質與保留和聲只開放給有 NVIDIA 顯卡的電腦（CPU 上實測 8 秒片段要 3 分鐘）。第一次使用會下載模型（約 610 MB／870 MB）到 `C:\denki-karaoke\models`。
+高品質與保留和聲只開放給有 NVIDIA 顯卡的電腦（CPU 上實測 8 秒片段要 3 分鐘）。第一次使用會下載模型（約 610 MB／870 MB）到 `<安裝位置>\models`。
 
 ### 中間檔
 
@@ -59,10 +74,10 @@ C:\denki-karaoke\
 **命令列（在 app 資料夾開 PowerShell）：**
 
 ```
-C:\denki-karaoke\venv\Scripts\python.exe -m karaoke info
-C:\denki-karaoke\venv\Scripts\python.exe -m karaoke make  "歌.mp4" --key -3 --guide 20 --mp3
-C:\denki-karaoke\venv\Scripts\python.exe -m karaoke render "歌名" --key 5          ← 不重跑 AI，幾秒完成
-C:\denki-karaoke\venv\Scripts\python.exe -m karaoke list
+..\python\python.exe -m karaoke info
+..\python\python.exe -m karaoke make  "歌.mp4" --key -3 --guide 20 --mp3
+..\python\python.exe -m karaoke render "歌名" --key 5          ← 不重跑 AI，幾秒完成
+..\python\python.exe -m karaoke list
 ```
 
 | 參數 | 意思 |
@@ -91,10 +106,15 @@ karaoke/
   cli.py        命令列
   server.py     本機後端（FastAPI，只聽 127.0.0.1）
   app.py        桌面視窗（pywebview / Edge WebView2）
+  deps.py       照鎖定清單安裝／核對套件（安裝程式、更新、更新並測試共用）
+  updater.py    程式內更新：問 GitHub Releases、下載核對、交給小幫手
+  update_helper.py  更新小幫手（只用內建功能）：換版、補套件、檢查、失敗換回、重新開啟
+installer/      安裝程式（install.ps1、uninstall.ps1、安裝.bat、圖示、打包腳本）
+wheels/         PyPI 上只有原始碼的套件，預先打包（proxy-tools）
 ui/             介面原始碼（React + Vite + TypeScript）
   dist/         編譯好的介面（已放進 repo，Windows 端不需要 Node）
   src/audio/engine.ts   預覽播放引擎：Signalsmith Stretch 即時變調
-tests/selftest.py   合成音自動測試 + 真實歌曲測試 + 介面檢查
+tests/selftest.py   合成音自動測試 + 真實歌曲測試 + 介面檢查 + 安裝與更新檢查
 ```
 
 ### 修改介面
@@ -107,7 +127,7 @@ tests/selftest.py   合成音自動測試 + 真實歌曲測試 + 介面檢查
 1. Python 鎖 3.11（3.13 上 Demucs 裝不完整）
 2. requirements 明列 numpy（Demucs 4.1.0 漏列）
 3. PowerShell 中文腳本存 UTF-8 with BOM
-4. FFmpeg 用 winget `Gyan.FFmpeg`（含 rubberband 變調濾鏡）
+4. FFmpeg 用 Gyan 的版本（含 rubberband 變調濾鏡），安裝程式放在 `ffmpeg\bin`
 5. amix 一定要 `normalize=0`，否則音量減半
 6. 所有外部指令用參數陣列，不拼字串
 7. Signalsmith Stretch **不能被 Vite 打包**（它把自己的原始碼送進音訊執行緒，壓縮改名後會卡住），放在 `ui/public/vendor/` 執行時載入
@@ -118,3 +138,9 @@ tests/selftest.py   合成音自動測試 + 真實歌曲測試 + 介面檢查
 12. 音量補償 = 原曲 LUFS − 伴奏 LUFS（上限 12 dB），再乘上（1 − 導唱%）；輸出與預覽都有限幅器防破音
 13. **不要裝 onnx2torch-py313 / torchvision**：onnx2torch 要求 torchvision，pip 從一般來源補裝時會把顯卡版 PyTorch 換成 CPU 版（2.1 版踩過）。RoFormer 用不到它們。更新腳本會自動移除，並在「有 NVIDIA 顯卡但 PyTorch 是 CPU 版」時自動重裝顯卡版
 14. 2.1 版以前分析的歌沒有響度資料，第一次打開或輸出時自動補量（`pipeline.ensure_loudness`），否則音量補償會是 0
+15. **套件一律鎖確切版本**：rotary-embedding-torch 0.9.x 讓 RoFormer 人聲全零（2.3.3 踩過），`requirements-lock.txt` 鎖 0.6.5；測試要驗「內容」（人聲軌有聲音），不能只看檔案在不在
+16. pywebview 的 js_api 物件只能有方法，公開欄位（例如 window）會讓它每次載入頁面翻遍 .NET 物件 → 視窗沒有回應（2.3.3）
+17. PyTorch、librosa 放子程序載入（載入時佔住 GIL，視窗會卡）；所有子程序加 CREATE_NO_WINDOW
+18. 嵌入式 Python 的 `python311._pth` 要有 `import site` 和 `..\app`，不然找不到套件和程式
+19. 更新小幫手只能用 Python 內建功能，而且要在 `_update` 裡執行（待在 app 資料夾裡，Windows 就換不掉它）
+20. 發佈的標籤版本要跟程式裡的版本號一樣，不一樣會拒絕更新（不然會一直提示有新版）

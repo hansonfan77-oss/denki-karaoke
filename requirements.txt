@@ -1,4 +1,5 @@
-# PyTorch 要另外用顯卡版來源安裝（setup.ps1 會處理）：
+# ⚠️ 安裝一律照 requirements-lock.txt（確切版本，python -m karaoke.deps）。這份只記錄「直接用到哪些套件」。
+# PyTorch 要另外用顯卡版來源安裝（karaoke/deps.py 會處理）：
 #   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 numpy          # Demucs 4.1.0 漏列這個相依，必須自己寫
 demucs>=4.0
