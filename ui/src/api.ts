@@ -76,6 +76,33 @@ export interface LrclibResult {
   lines: LyricLine[]
   plain: string
 }
+export interface KaraokeSettings {
+  style: import('./karaoke/lyricsView').KStyle
+  background: { kind: 'auto' | 'video' | 'color' | 'image' | 'cover'; color: string }
+  audio: { mode: ModeId; key: number; guide: number }
+  alsoLrc: boolean
+  fonts: { id: string; label: string; family: string }[]
+  resolvedBg: { kind: 'video' | 'color' | 'image' | 'cover'; color: string }
+  hasVideo: boolean
+  videoPreview: boolean
+  hasCover: boolean
+  hasImage: boolean
+  outName: string
+  outDir: string
+  analyzedModes: ModeId[]
+  compensationDb: Record<string, number>
+}
+export interface KaraokeJob {
+  id: string
+  slug: string
+  state: 'running' | 'done' | 'error' | 'cancelled'
+  progress: number
+  message: string
+  elapsed: number
+  eta: number | null
+  error: string | null
+  result: { files: string[]; seconds: number; encoder: string; background: string } | null
+}
 export interface AlignStatus { packages: boolean; model: boolean; modelBytes: number; modelName: string; device: 'cuda' | 'cpu' }
 export interface AlignJob {
   id: string
@@ -196,7 +223,20 @@ export const api = {
   align: (slug: string, text: string, lang?: string) => call<AlignJob>(`api/songs/${enc(slug)}/align`, json({ text, lang })),
   alignJob: (id: string) => call<AlignJob>(`api/align-jobs/${id}`),
   cancelAlign: (id: string) => call<AlignJob>(`api/align-jobs/${id}/cancel`, { method: 'POST' }),
+  // 第 5 批
+  karaoke: (slug: string) => call<KaraokeSettings>(`api/songs/${enc(slug)}/karaoke`),
+  saveKaraoke: (slug: string, body: Partial<Pick<KaraokeSettings, 'style' | 'background' | 'audio' | 'alsoLrc'>>) =>
+    call<KaraokeSettings>(`api/songs/${enc(slug)}/karaoke`, json(body, 'PUT')),
+  uploadBg: (slug: string, file: File) =>
+    call<KaraokeSettings>(`api/songs/${enc(slug)}/bg-image?name=${enc(file.name)}`, { method: 'PUT', body: file }),
+  renderKaraoke: (slug: string, outDir?: string | null) =>
+    call<KaraokeJob>(`api/songs/${enc(slug)}/karaoke-render`, json({ outDir: outDir || null })),
+  karaokeJob: (id: string) => call<KaraokeJob>(`api/karaoke-jobs/${id}`),
+  cancelKaraoke: (id: string) => call<KaraokeJob>(`api/karaoke-jobs/${id}/cancel`, { method: 'POST' }),
 }
+
+export const songFileUrl = (slug: string, kind: 'bg-image' | 'cover' | 'video', v = '') =>
+  `api/songs/${enc(slug)}/${kind}${v ? `?v=${enc(v)}` : ''}`
 
 export const stemUrl = (slug: string, mode: ModeId, name: 'no_vocals' | 'vocals') =>
   `api/songs/${enc(slug)}/stems/${mode}/${name}`

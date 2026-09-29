@@ -1,12 +1,14 @@
-/** 卡拉影片分頁（第二期）：① 選歌與歌詞 → ② 對時間 →（第 5 批）③ 字幕樣式 → ④ 輸出 */
+/** 卡拉影片分頁（第二期）：① 選歌與歌詞 → ② 對時間 → ③ 字幕樣式 → ④ 輸出 */
 import { useCallback, useEffect, useState } from 'react'
-import { api, fmtTime, MODE_LABEL, type Lyrics, type Song } from '../api'
+import { api, fmtTime, MODE_LABEL, type KaraokeSettings, type Lyrics, type Song } from '../api'
+import ExportStep from './ExportStep'
 import LyricsStep from './LyricsStep'
+import StyleStep from './StyleStep'
 import TimingStep from './TimingStep'
 
-type Step = 'lyrics' | 'timing'
+type Step = 'lyrics' | 'timing' | 'style' | 'export'
 
-const STEPS: { id: Step | 'style' | 'export'; label: string }[] = [
+const STEPS: { id: Step; label: string }[] = [
   { id: 'lyrics', label: '選歌與歌詞' },
   { id: 'timing', label: '對時間' },
   { id: 'style', label: '字幕樣式' },
@@ -19,6 +21,7 @@ export default function KaraokeTab({ onGoAccomp }: { onGoAccomp: () => void }) {
   const [step, setStep] = useState<Step>('lyrics')
   const [lyr, setLyr] = useState<{ slug: string; lyrics: Lyrics | null; titleGuess: string } | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [ks, setKs] = useState<KaraokeSettings | null>(null)
 
   const reload = useCallback(() => api.songs().then(list => {
     setSongs(list)
@@ -30,9 +33,11 @@ export default function KaraokeTab({ onGoAccomp }: { onGoAccomp: () => void }) {
   useEffect(() => {
     if (!slug) return
     setLyr(null)
+    setKs(null)
     setStep('lyrics')
     let stale = false
     api.lyrics(slug).then(r => { if (!stale) setLyr({ slug, ...r }) }).catch(e => !stale && setErr((e as Error).message))
+    api.karaoke(slug).then(r => { if (!stale) setKs(r) }).catch(e => !stale && setErr((e as Error).message))
     return () => { stale = true }
   }, [slug])
 
@@ -61,16 +66,16 @@ export default function KaraokeTab({ onGoAccomp }: { onGoAccomp: () => void }) {
         <div className="ksteps">
           {STEPS.map((s, i) => {
             const idx = STEPS.findIndex(x => x.id === step)
-            const later = s.id === 'style' || s.id === 'export'
+            const hasLyrics = !!(ready && lyr?.lyrics?.lines.length)
+            const blocked = s.id !== 'lyrics' && (!hasLyrics || (s.id !== 'timing' && !ks))
             const cls = s.id === step ? 'on' : i < idx ? 'done' : ''
             return (
               <div key={s.id} className="ksteps-item">
                 {i > 0 && <span className="ksteps-sep" />}
                 <button className={`kstep ${cls}`}
-                  disabled={later || (s.id === 'timing' && !(ready && lyr?.lyrics?.lines.length))}
-                  title={later ? '第 5 批（下一批）' : undefined}
-                  onClick={() => !later && setStep(s.id as Step)}>
-                  <b>{i < idx ? '✓' : i + 1}</b>{s.label}{later && <span className="ksoon">下一批</span>}
+                  disabled={blocked} title={blocked ? '先選好歌詞' : undefined}
+                  onClick={() => setStep(s.id)}>
+                  <b>{i < idx ? '✓' : i + 1}</b>{s.label}
                 </button>
               </div>
             )
@@ -118,7 +123,15 @@ export default function KaraokeTab({ onGoAccomp }: { onGoAccomp: () => void }) {
 
       {step === 'timing' && song && ready && lyr!.lyrics && (
         <TimingStep key={song.slug} song={song} initial={lyr!.lyrics}
-          onBack={() => setStep('lyrics')} onSaved={onSaved} />
+          onBack={() => setStep('lyrics')} onSaved={onSaved} onNext={ks ? () => setStep('style') : undefined} />
+      )}
+      {step === 'style' && song && ready && lyr!.lyrics && ks && (
+        <StyleStep key={song.slug} song={song} lyrics={lyr!.lyrics} settings={ks} onSettings={setKs}
+          onBack={() => setStep('timing')} onNext={() => setStep('export')} />
+      )}
+      {step === 'export' && song && ready && lyr!.lyrics && ks && (
+        <ExportStep key={song.slug} song={song} lyrics={lyr!.lyrics} settings={ks} onSettings={setKs}
+          onBack={() => setStep('style')} />
       )}
     </main>
   )

@@ -563,8 +563,9 @@ def main() -> int:
         r.info(traceback.format_exc()[-1500:])
 
     try:
-        from tests.lyrics_selftest import lyrics_tests
+        from tests.lyrics_selftest import karaoke_video_tests, lyrics_tests
         lyrics_tests(r, make_test_video)
+        karaoke_video_tests(r, make_test_video)
     except Exception as e:  # noqa: BLE001
         r.fail("歌詞與對時間測試中斷", str(e))
         r.info(traceback.format_exc()[-1500:])

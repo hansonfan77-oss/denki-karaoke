@@ -166,3 +166,56 @@ export function spreadEvenly(texts: string[], duration: number): LyricLine[] {
   const span = Math.max(1, (duration - start - 5) / Math.max(1, texts.length))
   return texts.map((text, i) => ({ t: Math.round((start + i * span) * 100) / 100, end: null, text }))
 }
+
+// ---------------- 第 5 批：字幕樣式與版面（跟 karaoke/kvideo.py 的 geometry()、fit_size() 同一套數字）
+export interface KStyle {
+  font: string
+  size: number
+  unsung: string
+  sung: string
+  outline: number
+  position: 'bottom' | 'middle'
+  plate: 'none' | 'black' | 'white'
+  plateOpacity: number
+  countdown: boolean
+  sweep: boolean
+}
+
+export const VW = 1920, VH = 1080
+
+export function geometry(s: KStyle) {
+  const fs = s.size
+  const padV = fs * 0.45, padH = Math.max(60, fs * 1.1)
+  const dotsH = fs * 0.5, lineH = fs * 1.25, gap = fs * 0.25
+  const plateH = 2 * padV + 2 * (dotsH + lineH) + gap
+  const top = s.position === 'bottom' ? VH * 0.96 - plateH : (VH - plateH) / 2
+  const slots = [0, 1].map(k => {
+    const y0 = top + padV + k * (dotsH + lineH + gap)
+    return { dots: y0, line: y0 + dotsH }
+  })
+  return { fs, padH, plateTop: top, plateH, lineH, slots }
+}
+
+function charW(ch: string): number {
+  if (ch === ' ') return 0.3
+  const o = ch.codePointAt(0) ?? 0
+  // 全形（中日韓文字、假名、全形符號）當 1 個字寬，其他 0.58
+  if ((o >= 0x1100 && o <= 0x115f) || (o >= 0x2e80 && o <= 0xa4cf) || (o >= 0xac00 && o <= 0xd7a3) ||
+    (o >= 0xf900 && o <= 0xfaff) || (o >= 0xfe30 && o <= 0xfe4f) || (o >= 0xff00 && o <= 0xff60) ||
+    (o >= 0xffe0 && o <= 0xffe6) || (o >= 0x20000 && o <= 0x3fffd) || o === 0x3000) return 1
+  return 0.58
+}
+
+/** 太長的句子縮小（不超出畫面） */
+export function fitSize(text: string, fs: number, padH: number): number {
+  let w = 0
+  for (const ch of text) w += charW(ch)
+  w *= fs
+  const room = VW - 2 * padH
+  return w <= room ? fs : Math.max(fs * 0.5, (fs * room) / w)
+}
+
+/** 底板要不要出現：有字幕或倒數的時候 */
+export function plateVisible(v: StageView): boolean {
+  return !!(v.slots[0] || v.slots[1] || v.countdown)
+}

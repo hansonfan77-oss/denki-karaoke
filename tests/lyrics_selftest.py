@@ -12,7 +12,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from karaoke import align, config, lyrics, pipeline
+from karaoke import align, config, ffmpeg, kvideo, lyrics, pipeline
 from karaoke.project import Song
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -180,3 +180,61 @@ def lyrics_tests(r, make_test_video) -> None:
         r.info(f"   對時間模型：{'已下載' if align.model_ready() else '還沒下載（第一次用到才下載，約 1.5 GB）'}")
     else:
         r.info("   （這台沒有安裝 AI 對時間元件，略過載入檢查）")
+
+
+def karaoke_video_tests(r, make_test_video) -> None:
+    """第 5 批：字幕（ASS）規則與輸出 MP4。"""
+    r.info("")
+    r.info("【F. 卡拉影片：字幕樣式與輸出】")
+    lines = [{"t": t, "end": None, "text": f"第{i + 1}句歌詞測試"} for i, t in enumerate([6, 10, 14, 18, 30, 34])]
+    ass = kvideo.build_ass(lines, 0.5, kvideo.DEFAULT_STYLE, 45)
+    lyr = [x for x in ass.splitlines() if x.startswith("Dialogue: 2,")]
+    dots = [x for x in ass.splitlines() if x.startswith("Dialogue: 1,")]
+    plates = [x for x in ass.splitlines() if x.startswith("Dialogue: 0,")]
+    r.check("字幕：每句一行、上下交替", len(lyr) == 6 and "\\an7" in lyr[0] and "\\an9" in lyr[1] and "\\kf" in lyr[0],
+            f"{len(lyr)} 句")
+    r.check("字幕：前奏與間奏倒數", len(dots) == 6 and "0:00:03.50" in dots[0], f"{len(dots)} 個倒數畫面（開頭、間奏各 3）")
+    r.check("字幕：底板只在有字幕時出現", len(plates) == 2, f"{len(plates)} 段")
+    wide = kvideo.fit_size("あ" * 40, 64, 70)
+    r.check("太長的句子自動縮小", wide < 64 and kvideo.text_width("あ" * 40, wide) <= 1920 - 140 + 1, f"字高 64 → {wide:.0f}")
+    no_plate = kvideo.build_ass(lines, 0, {**kvideo.DEFAULT_STYLE, "plate": "none", "countdown": False, "sweep": False}, 45)
+    r.check("樣式開關（不用底板、不倒數、不掃色）", "Dialogue: 0," not in no_plate and "Dialogue: 1," not in no_plate
+            and "\\kf" not in no_plate, "都有作用")
+
+    with tempfile.TemporaryDirectory(prefix="denki-kv-test-") as tmp:
+        tmp = Path(tmp)
+        src = tmp / "卡拉 測試!.mp4"
+        make_test_video(src)
+        song = pipeline.analyze(src, backend="fake", songs_dir=tmp / "songs", log=lambda *_: None)
+        lyrics.save(song, [{"t": 1.0, "end": 2.5, "text": "街の灯りが"}, {"t": 3.0, "end": 5.0, "text": "君の声だけ"}],
+                    source="manual", offset=0)
+        saved_root = config.ROOT
+        config.ROOT = tmp          # 設定檔寫到暫存資料夾，不要動到真的 settings.json
+        try:
+            kvideo.save_settings(song, {"audio": {"key": -2, "guide": 20}})
+            t0 = time.perf_counter()
+            res = kvideo.render(song, out_dir=tmp / "out")
+            secs = time.perf_counter() - t0
+            mp4 = Path(res["files"][0])
+            info = ffmpeg.probe(mp4)
+            import json as _j
+            from karaoke.proc import NO_WINDOW
+            pr = subprocess.run([ffmpeg.find("ffprobe"), "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                 "stream=width,height", "-of", "json", str(mp4)], capture_output=True, text=True, **NO_WINDOW)
+            st = (_j.loads(pr.stdout or "{}").get("streams") or [{}])[0]
+            r.check("輸出卡拉影片（原影片背景）", st.get("width") == 1920 and st.get("height") == 1080
+                    and abs(info["duration"] - 6) < 0.3 and mp4.name == "卡拉 測試!_卡拉_-2key_導唱20.mp4",
+                    f"{mp4.name}，{st.get('width')}×{st.get('height')}，{info['duration']:.1f} 秒，{res['encoder']}，{secs:.1f} 秒")
+            lrc = [Path(f) for f in res["files"] if f.endswith(".lrc")]
+            r.check("同時輸出 .lrc", bool(lrc) and len(lyrics.parse_lrc(lrc[0].read_text(encoding="utf-8-sig"))) == 2,
+                    lrc[0].name if lrc else "沒有產生")
+            kvideo.save_settings(song, {"background": {"kind": "color", "color": "#10302A"}})
+            res2 = kvideo.render(song, out_dir=tmp / "out2", also_lrc=False)
+            r.check("單色背景輸出", res2["background"] == "color" and Path(res2["files"][0]).exists(), res2["encoder"])
+        finally:
+            config.ROOT = saved_root
+
+    win_fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    if win_fonts.is_dir():
+        have = [v["label"] for v in kvideo.FONTS.values() if any((win_fonts / f).exists() for f in v["files"])]
+        r.check("字幕字型", "微軟正黑體" in have, "、".join(have) or "一個都沒有")

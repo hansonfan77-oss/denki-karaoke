@@ -11,11 +11,12 @@ const UNDO_MAX = 60
 
 type Snapshot = { lines: LyricLine[]; offset: number }
 
-export default function TimingStep({ song, initial, onBack, onSaved }: {
+export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
   song: Song
   initial: Lyrics
   onBack: () => void
   onSaved: (l: Lyrics) => void
+  onNext?: () => void
 }) {
   const slug = song.slug
   const [lines, setLines] = useState<LyricLine[]>(initial.lines)
@@ -333,7 +334,7 @@ export default function TimingStep({ song, initial, onBack, onSaved }: {
             {saveState === 'saving' ? '儲存中…' : saveState === 'dirty' ? '有修改，稍後自動儲存' : saveState === 'error' ? `儲存失敗：${saveErr}` : '已自動儲存'}
           </span>
           <div className="spacer" />
-          <button className="btn primary" disabled title="第 5 批（下一批）：字幕樣式、背景、輸出 MP4">下一步：字幕樣式</button>
+          <button className="btn primary" disabled={!onNext} onClick={async () => { if (saveState === 'dirty') await saveNow(); onNext?.() }}>下一步：字幕樣式</button>
         </div>
       </div>
     </div>

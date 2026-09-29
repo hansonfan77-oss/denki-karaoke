@@ -34,6 +34,15 @@ GET    /api/align/status                      AI 對時間元件與模型是否�
 POST   /api/songs/{slug}/align {text, lang?}  開始 AI 對時間 → {job}
 GET    /api/align-jobs/{id}                   對時間進度
 POST   /api/align-jobs/{id}/cancel            取消
+
+第 5 批（卡拉影片：字幕樣式與輸出）
+GET    /api/songs/{slug}/karaoke              樣式、背景、伴奏設定＋可用的字型、背景選項
+PUT    /api/songs/{slug}/karaoke {style?, background?, audio?, alsoLrc?}  存設定（樣式同時記成下一首的預設）
+PUT    /api/songs/{slug}/bg-image?name=…      上傳背景圖片
+GET    /api/songs/{slug}/bg-image | cover | video   預覽用：背景圖、專輯封面、原影片
+POST   /api/songs/{slug}/karaoke-render {outDir?}   輸出卡拉影片 → {job}
+GET    /api/karaoke-jobs/{id}                 輸出進度
+POST   /api/karaoke-jobs/{id}/cancel          取消
 """
 
 from __future__ import annotations
@@ -55,7 +64,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, align, beats, config, export, ffmpeg, lyrics, pipeline, separate, updater
+from . import __version__, align, beats, config, export, ffmpeg, kvideo, lyrics, pipeline, separate, updater
 from .hardware import detect_device
 from .mix import MixError
 from .project import STEM_NAMES, Song, list_songs, slugify
@@ -246,6 +255,67 @@ def _run_align(job: AlignJob, song: Song, text: str, lang: Optional[str]) -> Non
         job.finished = time.time()
 
 
+# ------------------------------------------------------------------ 卡拉影片輸出工作（第 5 批）
+@dataclass
+class KaraokeJob:
+    id: str
+    slug: str
+    state: str = "running"
+    progress: float = 0.0
+    message: str = "準備中…"
+    started: float = field(default_factory=time.time)
+    finished: Optional[float] = None
+    error: Optional[str] = None
+    result: Optional[dict] = None
+    _cancel: kvideo.CancelToken = field(default_factory=kvideo.CancelToken, repr=False)
+
+    def public(self) -> dict:
+        d = {f: getattr(self, f) for f in self.__dataclass_fields__ if not f.startswith("_")}
+        now = self.finished or time.time()
+        d["elapsed"] = round(now - self.started, 1)
+        d["eta"] = (round((now - self.started) * (100 - self.progress) / self.progress)
+                    if self.state == "running" and self.progress > 8 else None)
+        return d
+
+
+KARAOKE_JOBS: dict[str, KaraokeJob] = {}
+
+
+def _run_karaoke(job: KaraokeJob, song: Song, out_dir: Optional[str]) -> None:
+    def on_progress(pct: float, msg: str) -> None:
+        job.progress, job.message = round(pct, 1), msg
+
+    try:
+        job.result = kvideo.render(song, out_dir=Path(out_dir) if out_dir else None,
+                                   progress=on_progress, cancel=job._cancel)
+        job.state, job.progress, job.message = "done", 100.0, "完成"
+    except kvideo.Cancelled:
+        job.state, job.message = "cancelled", "已取消"
+    except Exception as e:  # noqa: BLE001
+        logging.exception("卡拉影片輸出失敗")
+        job.state, job.error = "error", str(e)
+    finally:
+        job.finished = time.time()
+
+
+def karaoke_public(s: Song) -> dict:
+    st = kvideo.load_settings(s)
+    out_dir = load_settings().get("outDir") or str(s.out_dir)
+    return {
+        **st,
+        "fonts": [{"id": k, "label": v["label"], "family": v["family"]} for k, v in kvideo.FONTS.items()],
+        "resolvedBg": {k: v for k, v in kvideo.resolve_bg(s, st["background"]).items() if k != "path"},
+        "hasVideo": s.has_video and s.source_path.exists(),
+        "videoPreview": s.has_video and s.source_path.suffix.lower() in {".mp4", ".m4v", ".mov", ".webm"},
+        "hasCover": kvideo.cover_path(s) is not None,
+        "hasImage": kvideo.bg_image_path(s) is not None,
+        "outName": kvideo.output_name(s, st["audio"]["key"], st["audio"]["guide"]),
+        "outDir": out_dir,
+        "analyzedModes": s.analyzed_modes(),
+        "compensationDb": {m: s.compensation_db(m) for m in s.analyzed_modes()},
+    }
+
+
 # ------------------------------------------------------------------ API
 class AnalyzeBody(BaseModel):
     path: str
@@ -306,6 +376,10 @@ class LyricsBody(BaseModel):
     lrclib: Optional[dict] = None
 
 
+class KaraokeRenderBody(BaseModel):
+    outDir: Optional[str] = None
+
+
 class AlignBody(BaseModel):
     text: str
     lang: Optional[str] = None
@@ -315,7 +389,8 @@ def create_app() -> FastAPI:
     from .hardware import warm_up
     warm_up()   # 背景先查顯卡（子程序，幾秒），第一次開畫面時多半已經查好
     app = FastAPI(title="DENKI 伴奏工具", version=__version__)
-    updater.busy_check = lambda: any(j.state == "running" for j in [*JOBS.values(), *ALIGN_JOBS.values()])
+    updater.busy_check = lambda: any(j.state == "running" for j in [*JOBS.values(), *ALIGN_JOBS.values(),
+                                                                     *KARAOKE_JOBS.values()])
     if os.environ.get("DENKI_UPDATE_AUTO", "1") != "0" and updater.enabled()[0]:
         updater.check_in_background()   # 開啟時自動檢查（背景，連不上網也不影響）
 
@@ -602,6 +677,76 @@ def create_app() -> FastAPI:
     @app.post("/api/align-jobs/{job_id}/cancel")
     def align_cancel(job_id: str):
         j = ALIGN_JOBS.get(job_id)
+        if not j:
+            raise HTTPException(404, "找不到這個工作")
+        j._cancel.cancel()
+        return j.public()
+
+    # ---------------- 第 5 批：字幕樣式與輸出
+    @app.get("/api/songs/{slug}/karaoke")
+    def get_karaoke(slug: str):
+        return karaoke_public(get_song(slug))
+
+    @app.put("/api/songs/{slug}/karaoke")
+    def put_karaoke(slug: str, body: dict):
+        s = get_song(slug)
+        kvideo.save_settings(s, body)
+        return karaoke_public(s)
+
+    @app.put("/api/songs/{slug}/bg-image")
+    async def put_bg(slug: str, request: Request, name: str):
+        s = get_song(slug)
+        try:
+            kvideo.save_bg_image(s, name, await request.body())
+        except kvideo.KaraokeError as e:
+            raise HTTPException(400, str(e)) from e
+        return karaoke_public(s)
+
+    def _file(p: Optional[Path]):
+        if not p or not Path(p).exists():
+            raise HTTPException(404, "沒有這個檔案")
+        return FileResponse(p)
+
+    @app.get("/api/songs/{slug}/bg-image")
+    def bg_image(slug: str):
+        return _file(kvideo.bg_image_path(get_song(slug)))
+
+    @app.get("/api/songs/{slug}/cover")
+    def cover(slug: str):
+        return _file(kvideo.cover_path(get_song(slug)))
+
+    @app.get("/api/songs/{slug}/video")
+    def video(slug: str):
+        s = get_song(slug)
+        return _file(s.source_path if s.has_video else None)
+
+    @app.post("/api/songs/{slug}/karaoke-render")
+    def karaoke_render(slug: str, body: KaraokeRenderBody):
+        s = get_song(slug)
+        for j in KARAOKE_JOBS.values():
+            if j.state == "running":
+                if j.slug == slug:
+                    return j.public()
+                raise HTTPException(409, "另一首歌正在輸出，請等它完成。")
+        lyr = lyrics.load(s)
+        if not lyr or not lyr["lines"]:
+            raise HTTPException(400, "這首歌還沒有歌詞。")
+        job = KaraokeJob(id=uuid.uuid4().hex[:10], slug=slug)
+        KARAOKE_JOBS[job.id] = job
+        out_dir = body.outDir or load_settings().get("outDir") or None
+        threading.Thread(target=_run_karaoke, args=(job, s, out_dir), daemon=True).start()
+        return job.public()
+
+    @app.get("/api/karaoke-jobs/{job_id}")
+    def karaoke_job(job_id: str):
+        j = KARAOKE_JOBS.get(job_id)
+        if not j:
+            raise HTTPException(404, "找不到這個工作")
+        return j.public()
+
+    @app.post("/api/karaoke-jobs/{job_id}/cancel")
+    def karaoke_cancel(job_id: str):
+        j = KARAOKE_JOBS.get(job_id)
         if not j:
             raise HTTPException(404, "找不到這個工作")
         j._cancel.cancel()

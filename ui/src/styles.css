@@ -290,7 +290,7 @@ h1 { margin: 0; font-size: 22px; }
 .kt-save { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .kt-left > .kstage { align-self: center; }
 
-/* 字幕預覽畫面（第 5 批會加上背景與樣式設定） */
+/* 字幕預覽畫面 */
 .kstage { position: relative; flex: none; border-radius: 10px; overflow: hidden; background: #26343D; }
 .kstage-plate { position: absolute; left: 0; right: 0; bottom: 4%; display: flex; flex-direction: column; background: rgba(0, 0, 0, .5); }
 .kline-wrap { display: flex; flex-direction: column; justify-content: flex-end; }
@@ -300,3 +300,45 @@ h1 { margin: 0; font-size: 22px; }
 .kline-base, .kline-sung { -webkit-text-stroke: 1px #000; paint-order: stroke fill; }
 .kline-base { color: #fff; }
 .kline-sung { position: absolute; left: 0; top: 0; color: #4FD1C5; }
+
+/* ================= 第 5 批：字幕樣式、背景、輸出 ================= */
+.kstage-plate2 { position: absolute; left: 0; right: 0; }
+.kline2 { position: absolute; font-weight: 700; line-height: 1.25; white-space: nowrap; }
+.kline2 .kline-base, .kline2 .kline-sung { -webkit-text-stroke: 0; paint-order: stroke fill; }
+.kdots2 { position: absolute; color: #FFD166; letter-spacing: .15em; line-height: 1; font-weight: 700; paint-order: stroke fill; }
+.kbg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.kbg-blur { filter: blur(14px) brightness(.7); transform: scale(1.08); }
+.kbg-note { display: flex; align-items: center; justify-content: center; color: #C9D3D8; font-size: 13px; background: #26343D; padding: 20px; text-align: center; }
+.ksty { width: 420px; }
+.ksty-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+.ksty-h { font-size: 13px; font-weight: 700; padding-top: 4px; border-top: 1px solid var(--line); margin-top: 2px; padding-top: 12px; }
+.ksty-body > .ksty-h:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+.ksty-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+.ksty-f { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.ksty-f b { color: var(--text); }
+.ksty-f select { height: 36px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); }
+.ksty-checks { display: flex; gap: 18px; flex-wrap: wrap; }
+.ksty-bg button { flex: 1; }
+.swatches { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.swatch { width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border); padding: 0; position: relative; }
+.swatch.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+.swatch-pick { display: inline-flex; align-items: center; justify-content: center; background: var(--card); color: var(--muted); font-size: 16px; cursor: pointer; overflow: hidden; }
+.swatch-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.kx { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center; }
+.kx-card { width: 760px; max-width: 100%; height: fit-content; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; }
+.kx-title { margin: 0; font-size: 20px; }
+.kx-sum { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.kx-sum > div { padding: 10px 14px; border-radius: 10px; background: var(--bg); display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.kx-sum span { font-size: 11px; color: var(--muted); }
+.kx-audio { display: flex; flex-direction: column; gap: 10px; }
+.kx-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.kx-lab { width: 64px; flex: none; font-size: 13px; color: var(--muted); }
+.kx-key { min-width: 56px; text-align: center; font-variant-numeric: tabular-nums; }
+.kx-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; user-select: text; }
+.kx-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.kx-done { padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.kx-ok { width: 32px; height: 32px; }
+.kx-file { display: flex; align-items: center; gap: 10px; width: 100%; }
+.kx-foot { display: flex; align-items: center; gap: 10px; padding-top: 6px; }
+.ksty-body > * { flex-shrink: 0; }
+.ksty .swatch { width: 26px; height: 26px; }
