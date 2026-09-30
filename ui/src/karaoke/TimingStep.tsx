@@ -368,6 +368,7 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
                   ) : (
                     <span className="kt-text">{ln.text}</span>
                   )}
+                  {ln.words?.length ? <span className="kt-wtag" title="這句用 AI 逐字掃色">逐字</span> : null}
                 </div>
                 {on && (
                   <div className="kt-tools">
@@ -376,6 +377,12 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
                     <button className="btn sm primary" onClick={() => stampNow(i)} disabled={!engine}title="把這句的開始時間設成目前播放到的位置（播放中也可以按空白鍵）">設成現在</button>
                     <button className="linkbtn" onClick={() => playFrom(i)} disabled={!engine}>從這句播放</button>
                     <div className="spacer" />
+                    {ln.words?.length ? (
+                      <button className="linkbtn" title="只把這一句改回整句均分掃色（Ctrl+Z 可復原）"
+                        onClick={() => edit({ lines: state.current.lines.map((l, k) => (k === i ? { ...l, words: null } : l)) })}>
+                        這句改整句均分
+                      </button>
+                    ) : null}
                     <button className="linkbtn" onClick={() => setEditing({ i, text: ln.text })}>改字</button>
                     <button className="linkbtn" onClick={() => deleteLine(i)} disabled={lines.length <= 1}>刪除</button>
                   </div>
