@@ -219,3 +219,19 @@ export function fitSize(text: string, fs: number, padH: number): number {
 export function plateVisible(v: StageView): boolean {
   return !!(v.slots[0] || v.slots[1] || v.countdown)
 }
+
+// ---------------- 貼上中日對照歌詞時：自動略過中文翻譯、作詞作曲資訊
+const CREDIT = /^(作詞|作曲|編曲|作词|编曲|歌|唄|Vocal|Lyrics|Music)\s*[:：／/]/i
+function kanaCount(s: string) { let n = 0; for (const ch of s) { const o = ch.codePointAt(0) ?? 0; if (o >= 0x3040 && o <= 0x30ff) n++ } return n }
+function hanCount(s: string) { let n = 0; for (const ch of s) { const o = ch.codePointAt(0) ?? 0; if (o >= 0x4e00 && o <= 0x9fff) n++ } return n }
+
+/**
+ * 日文歌詞裡混著中文翻譯時，把翻譯行挑出來：整首大多是有假名的句子，而這一行完全沒有假名、卻有兩個以上漢字。
+ * 回傳 { keep: 要送去對時間的句子, dropped: 略過的行數 }；不是日文歌詞就原封不動。
+ */
+export function japaneseOnly(lines: string[]): { keep: string[]; dropped: number } {
+  const withKana = lines.filter(l => kanaCount(l) > 0).length
+  if (lines.length < 4 || withKana < lines.length * 0.3) return { keep: lines, dropped: 0 }
+  const keep = lines.filter(l => !CREDIT.test(l) && !(kanaCount(l) === 0 && hanCount(l) >= 2))
+  return { keep, dropped: lines.length - keep.length }
+}

@@ -352,3 +352,4 @@ h1 { margin: 0; font-size: 22px; }
 .kaudio-lab { font-size: 13px; color: var(--muted); margin-left: 8px; }
 .kaudio-val { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
 .kaudio input[type=range] { width: 160px; flex: 1; min-width: 120px; }
+.ks-filter { padding: 8px 12px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-dark); white-space: normal; line-height: 1.5; }

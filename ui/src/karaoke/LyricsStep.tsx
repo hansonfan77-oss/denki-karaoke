@@ -4,7 +4,7 @@ import {
   api, fmtSize, fmtTime,
   type AlignJob, type AlignStatus, type LrclibResult, type LyricLine, type Lyrics, type Song,
 } from '../api'
-import { detectLang, fmtStamp, LANG_LABEL, SOURCE_LABEL, splitPlain, spreadEvenly } from './lyricsView'
+import { detectLang, fmtStamp, japaneseOnly, LANG_LABEL, SOURCE_LABEL, splitPlain, spreadEvenly } from './lyricsView'
 
 type Tab = 'lrclib' | 'paste' | 'lrc'
 
@@ -184,14 +184,17 @@ function PasteTab({ song, text, setText, onAligned, onManual }: {
   useEffect(() => () => { alive.current = false }, [])
   useEffect(() => { api.alignStatus().then(setSt).catch(() => undefined) }, [])
 
-  const lines = splitPlain(text)
+  const [jaOnly, setJaOnly] = useState(true)
+  const all = splitPlain(text)
+  const filtered = japaneseOnly(all)
+  const lines = jaOnly ? filtered.keep : all
   const lang = detectLang(lines.join('\n'))
   const running = job?.state === 'running'
 
   const start = async () => {
     setErr(null)
     try {
-      let j = await api.align(song.slug, text, lang)
+      let j = await api.align(song.slug, lines.join('\n'), lang)
       setJob(j)
       while (j.state === 'running') {
         await new Promise(r => setTimeout(r, 500))
@@ -217,6 +220,12 @@ function PasteTab({ song, text, setText, onAligned, onManual }: {
             placeholder={'第一句歌詞\n第二句歌詞\n…'} />
         </label>
         <div className="muted small">{lines.length} 句{lines.length ? ` · 語言判斷：${LANG_LABEL[lang]}` : ''}</div>
+        {filtered.dropped > 0 && (
+          <label className="check ks-filter">
+            <input type="checkbox" checked={jaOnly} onChange={e => setJaOnly(e.target.checked)} disabled={running} />
+            只保留日文：略過 {filtered.dropped} 行中文翻譯、作詞作曲資訊（中日對照的歌詞可以整份直接貼）
+          </label>
+        )}
       </div>
       <div className="ks-col">
         <div className="ks-box">
