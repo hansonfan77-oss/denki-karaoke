@@ -275,6 +275,10 @@ def clean_lines(lines: list[dict]) -> list[dict]:
             item["words"] = words
             if ln.get("even"):          # 有逐字時間，但使用者把這句切成整句均分（資料保留，可以切回來）
                 item["even"] = True
+        from .furigana import clean_ruby
+        ruby = clean_ruby(ln.get("ruby"), item["text"])
+        if ruby is not None:            # 漢字讀音（v0.7.0）；沒有這個欄位＝還沒產生
+            item["ruby"] = ruby
         out.append(item)
     out.sort(key=lambda x: x["t"])
     return out

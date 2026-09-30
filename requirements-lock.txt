@@ -6,6 +6,7 @@
 #
 # PyTorch 不在這裡：要從 download.pytorch.org 裝顯卡版或 CPU 版，版本見 karaoke/deps.py 的 TORCH_VERSION。
 # 要升級任何套件：先在一台電腦上驗證（更新並測試.bat 全過、實際分離一首歌人聲正常），再改這份清單。
+# v0.7.0：漢字標假名（SudachiPy + 字典 sudachidict-core，約 77 MB，PyPI 有現成的 Windows 版）
 # 第 4 批：AI 對時間（stable-ts + openai-whisper；這兩個 PyPI 上只有原始碼，預先打包好放在 wheels\）
 absl-py==2.5.0
 annotated-doc==0.0.5
@@ -83,6 +84,8 @@ soxr==1.1.0
 sphn==0.2.1
 stable-ts==2.19.1
 starlette==1.6.0
+sudachidict-core==20260723.1
+sudachipy==0.7.0
 sympy==1.14.0
 threadpoolctl==3.7.0
 tiktoken==0.14.0

@@ -55,7 +55,9 @@ export interface Song {
 
 // ---------------- 第 4 批：卡拉影片（歌詞與對時間）
 export interface WordTime { text: string; t: number; end: number }
-export interface LyricLine { t: number; end: number | null; text: string; words?: WordTime[] | null; even?: boolean | null }
+export interface LyricLine { t: number; end: number | null; text: string; words?: WordTime[] | null; even?: boolean | null; ruby?: RubyItem[] | null }
+/** 漢字讀音：text[s..e) 標 r（r 空字串＝不標）；m＝手改過 */
+export interface RubyItem { s: number; e: number; r: string; m?: boolean }
 export type LyricsSource = 'lrclib' | 'ai' | 'lrc' | 'manual'
 export interface Lyrics {
   source: LyricsSource
@@ -222,6 +224,7 @@ export const api = {
   parseLrc: (text: string) => call<{ lines: LyricLine[]; lang: string }>('api/lyrics/parse-lrc', json({ text })),
   alignStatus: () => call<AlignStatus>('api/align/status'),
   align: (slug: string, text: string, lang?: string) => call<AlignJob>(`api/songs/${enc(slug)}/align`, json({ text, lang })),
+  furigana: (slug: string, redo = false) => call<Lyrics>(`api/songs/${enc(slug)}/furigana`, json({ redo })),
   refine: (slug: string, line?: number) => call<AlignJob>(`api/songs/${enc(slug)}/refine`, json(line === undefined ? {} : { line })),
   alignJob: (id: string) => call<AlignJob>(`api/align-jobs/${id}`),
   cancelAlign: (id: string) => call<AlignJob>(`api/align-jobs/${id}/cancel`, { method: 'POST' }),

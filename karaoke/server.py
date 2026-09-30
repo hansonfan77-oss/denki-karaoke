@@ -372,6 +372,11 @@ class LyricLine(BaseModel):
     text: str
     words: Optional[list[dict]] = None
     even: Optional[bool] = None
+    ruby: Optional[list[dict]] = None
+
+
+class FuriganaBody(BaseModel):
+    redo: bool = False              # True＝全部重新自動標音（保留手改過的）
 
 
 class RefineBody(BaseModel):
@@ -676,6 +681,26 @@ def create_app() -> FastAPI:
         ALIGN_JOBS[job.id] = job
         threading.Thread(target=_run_align, args=(job, s, body.text, body.lang), daemon=True).start()
         return job.public()
+
+    @app.post("/api/songs/{slug}/furigana")
+    def make_furigana(slug: str, body: Optional[FuriganaBody] = None):
+        """漢字自動標假名：補上還沒產生讀音的句子（redo＝全部重標，手改過的保留），存檔後回傳歌詞。"""
+        from . import furigana
+
+        s = get_song(slug)
+        lyr = lyrics.load(s)
+        if not lyr or not lyr["lines"]:
+            raise HTTPException(400, "這首歌還沒有歌詞。")
+        if not furigana.available():
+            raise HTTPException(503, "這台電腦還沒安裝日文讀音元件。請在程式右上角更新到最新版，或執行「更新並測試.bat」。")
+        try:
+            lines, changed = furigana.fill(lyr["lines"], redo=bool(body and body.redo))
+        except furigana.FuriganaError as e:
+            raise HTTPException(500, str(e)) from e
+        if not changed:
+            return lyr
+        return lyrics.save(s, lines, source=lyr["source"], offset=lyr["offset"], lang=lyr.get("lang"),
+                           lrclib=lyr.get("lrclib"))
 
     @app.post("/api/songs/{slug}/refine")
     def start_refine(slug: str, body: Optional[RefineBody] = None):

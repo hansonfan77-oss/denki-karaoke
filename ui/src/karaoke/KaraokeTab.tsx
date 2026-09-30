@@ -128,7 +128,7 @@ export default function KaraokeTab({ onGoAccomp }: { onGoAccomp: () => void }) {
           onRefined={l => { onSaved(l); setRev(r => r + 1) }} />
       )}
       {step === 'style' && song && ready && lyr!.lyrics && ks && (
-        <StyleStep key={song.slug} song={song} lyrics={lyr!.lyrics} settings={ks} onSettings={setKs}
+        <StyleStep key={song.slug} song={song} lyrics={lyr!.lyrics} settings={ks} onSettings={setKs} onLyrics={onSaved}
           onBack={() => setStep('timing')} onNext={() => setStep('export')} />
       )}
       {step === 'export' && song && ready && lyr!.lyrics && ks && (

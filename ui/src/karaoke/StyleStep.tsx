@@ -3,7 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api, fmtTime, keyLabel, MODE_LABEL, songFileUrl, type KaraokeSettings, type Lyrics, type ModeId, type Song } from '../api'
 import { Pause, Play } from '../icons'
 import LyricsStage from './LyricsStage'
-import { timed, type KStyle } from './lyricsView'
+import FuriganaPanel from './FuriganaPanel'
+import { SIZE_MAX, timed, type KStyle } from './lyricsView'
 import { useKaraokeEngine } from './useKaraokeEngine'
 
 const SUNG_SWATCHES = ['#4FD1C5', '#FFD166', '#FF8FAB', '#7AA2FF', '#FF6B6B']
@@ -12,9 +13,10 @@ const BG_COLORS = ['#1F2D36', '#000000', '#2B1E3A', '#10302A', '#3A2418']
 
 type BgKind = KaraokeSettings['background']['kind']
 
-export default function StyleStep({ song, lyrics, settings, onSettings, onBack, onNext }: {
+export default function StyleStep({ song, lyrics, settings, onSettings, onLyrics, onBack, onNext }: {
   song: Song
   lyrics: Lyrics
+  onLyrics: (l: Lyrics) => void
   settings: KaraokeSettings
   onSettings: (s: KaraokeSettings) => void
   onBack: () => void
@@ -25,6 +27,7 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
   const [bg, setBg] = useState(settings.background)
   const [audio, setAudio] = useState(settings.audio)
   const [dirty, setDirty] = useState(false)
+  const [tab, setTab] = useState<'style' | 'ruby'>('style')
   const [err, setErr] = useState<string | null>(null)
   const [imgStamp, setImgStamp] = useState(String(Date.now()))
   const { engine, loadP, err: engineErr, pos, playing } = useKaraokeEngine(slug, audio.mode, audio.key, audio.guide)
@@ -147,6 +150,18 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
       </div>
 
       <div className="card kt-right ksty">
+        <div className="ksty-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'style'} className={tab === 'style' ? 'on' : ''} onClick={() => setTab('style')}>
+            <b>字幕樣式</b><span>字型、顏色、底板、背景</span>
+          </button>
+          <button role="tab" aria-selected={tab === 'ruby'} className={tab === 'ruby' ? 'on' : ''} onClick={() => setTab('ruby')}>
+            <b>標音（假名）</b><span>{style.furigana ? '已開啟' : '關閉中'}</span>
+          </button>
+        </div>
+        {tab === 'ruby' ? (
+          <FuriganaPanel slug={slug} lyrics={lyrics} style={style} onStyle={setS} onLyrics={onLyrics}
+            onSeek={t => engine?.seek(Math.max(0, t))} pos={pos} />
+        ) : (
         <div className="ksty-body">
           <div className="ksty-h">字幕</div>
           <div className="ksty-grid">
@@ -156,7 +171,7 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
               </select>
             </label>
             <label className="ksty-f">大小 <b>{style.size}</b>
-              <input type="range" min={36} max={110} step={2} value={style.size} onChange={e => setS({ size: Number(e.target.value) })} />
+              <input type="range" min={36} max={SIZE_MAX} step={2} value={style.size} onChange={e => setS({ size: Number(e.target.value) })} />
             </label>
             <div className="ksty-f">未唱顏色
               <Swatches value={style.unsung} options={UNSUNG_SWATCHES} onPick={c => setS({ unsung: c })} />
@@ -221,6 +236,7 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
             onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }} />
           {err && <div className="notice error">{err}</div>}
         </div>
+        )}
         <div className="kt-foot">
           <button className="btn" onClick={() => { if (dirty) save(); onBack() }}>上一步：對時間</button>
           <span className="small muted kt-save">{dirty ? '稍後自動儲存' : '已自動儲存'}</span>

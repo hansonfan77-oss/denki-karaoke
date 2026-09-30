@@ -58,7 +58,10 @@ DEFAULT_STYLE = {
     "countdown": True,
     "sweep": True,
     "sweepWord": True,       # 有 AI 逐字時間的句子用逐字掃色（沒有的句子自動用整句均分）
+    "furigana": False,       # 漢字上方標假名（v0.7.0）
+    "rubySize": 45,          # 假名大小＝字幕大小的幾 %
 }
+SIZE_MAX = 140
 DEFAULT_BG = {"kind": "auto", "color": "#1F2D36", "fit": "fill"}   # kind: auto / video / color / image / cover
 BG_FITS = ("fill", "fit", "center")   # 自選圖片：填滿（裁切）/ 完整顯示 / 置中（原尺寸），空白處用模糊的同一張圖補
 BG_KINDS = ("auto", "video", "color", "image", "cover")
@@ -94,7 +97,7 @@ def normalize_style(d: Optional[dict]) -> dict:
     d = d or {}
     s = dict(DEFAULT_STYLE)
     s["font"] = d.get("font") if d.get("font") in FONTS else s["font"]
-    s["size"] = int(_num(d.get("size"), 36, 110, s["size"]))
+    s["size"] = int(_num(d.get("size"), 36, SIZE_MAX, s["size"]))
     s["unsung"] = _color(d.get("unsung"), s["unsung"])
     s["sung"] = _color(d.get("sung"), s["sung"])
     s["outline"] = int(_num(d.get("outline"), 0, 8, s["outline"]))
@@ -104,6 +107,8 @@ def normalize_style(d: Optional[dict]) -> dict:
     s["countdown"] = bool(d.get("countdown", s["countdown"]))
     s["sweep"] = bool(d.get("sweep", s["sweep"]))
     s["sweepWord"] = True    # v0.6.3 起逐字／均分改在「對時間」逐句切換，這個總開關固定開
+    s["furigana"] = bool(d.get("furigana", s["furigana"]))
+    s["rubySize"] = int(_num(d.get("rubySize"), 30, 60, s["rubySize"]))
     return s
 
 
@@ -241,13 +246,16 @@ def geometry(style: dict) -> dict:
     fs = style["size"]
     pad_v, pad_h = fs * 0.45, max(60.0, fs * 1.1)
     dots_h, line_h, gap = fs * 0.5, fs * 1.25, fs * 0.25
-    plate_h = 2 * pad_v + 2 * (dots_h + line_h) + gap
+    ruby_h = fs * style.get("rubySize", 45) / 100 * 1.15 if style.get("furigana") else 0.0   # 假名那一列
+    row = dots_h + ruby_h + line_h
+    plate_h = 2 * pad_v + 2 * row + gap
     top = H * 0.96 - plate_h if style["position"] == "bottom" else (H - plate_h) / 2
     slots = []
     for s in (0, 1):
-        y0 = top + pad_v + s * (dots_h + line_h + gap)
-        slots.append({"dots": y0, "line": y0 + dots_h})
-    return {"fs": fs, "padH": pad_h, "plateTop": top, "plateH": plate_h, "lineH": line_h, "slots": slots}
+        y0 = top + pad_v + s * (row + gap)
+        slots.append({"dots": y0, "line": y0 + dots_h + ruby_h})
+    return {"fs": fs, "padH": pad_h, "plateTop": top, "plateH": plate_h, "lineH": line_h, "rubyH": ruby_h,
+            "slots": slots}
 
 
 def text_width(text: str, fs: float) -> float:
@@ -260,6 +268,60 @@ def text_width(text: str, fs: float) -> float:
         else:
             w += 0.58
     return w * fs
+
+
+def _font_file(font: str) -> Optional[Path]:
+    win_fonts = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    for key in dict.fromkeys([font, "jhenghei"]):
+        for f in FONTS[key]["files"]:
+            if (win_fonts / f).exists():
+                return win_fonts / f
+    return None
+
+
+def _sfnt_metrics(path: Path) -> tuple[int, int]:
+    """讀字型檔（.ttf/.ttc 第一個字型）的 unitsPerEm 與 Windows 行高（usWinAscent + usWinDescent）。"""
+    import struct
+
+    with open(path, "rb") as f:
+        def at(off: int, n: int) -> bytes:
+            f.seek(off)
+            return f.read(n)
+        base = struct.unpack(">I", at(12, 4))[0] if at(0, 4) == b"ttcf" else 0
+        n = struct.unpack(">H", at(base + 4, 2))[0]
+        tables = {}
+        for i in range(n):
+            tag, _, off, _ = struct.unpack(">4sIII", at(base + 12 + 16 * i, 16))
+            tables[tag] = off
+        upem = struct.unpack(">H", at(tables[b"head"] + 18, 2))[0]
+        asc, desc = struct.unpack(">HH", at(tables[b"OS/2"] + 74, 4))
+        if asc + desc == 0:
+            a, d = struct.unpack(">hh", at(tables[b"hhea"] + 4, 4))
+            asc, desc = a, -d
+        return upem, asc + desc
+
+
+_MEASURERS: dict[str, Callable[[str, float], float]] = {}
+
+
+def measurer(font: str) -> Callable[[str, float], float]:
+    """字寬量尺：(文字, 字幕字級) → 實際畫出來的寬度（px），跟 libass 一樣的算法
+    （ASS 的字級＝字型的 Windows 行高，所以 1 個字寬＝字級 × unitsPerEm ÷ 行高）。找不到字型就用估的。"""
+    if font in _MEASURERS:
+        return _MEASURERS[font]
+    fn: Callable[[str, float], float] = text_width
+    path = _font_file(font)
+    if path:
+        try:
+            from PIL import ImageFont
+
+            upem, real = _sfnt_metrics(path)
+            pil = ImageFont.truetype(str(path), size=upem, index=0, layout_engine=ImageFont.Layout.BASIC)
+            fn = lambda text, fs: pil.getlength(text) * fs / real  # noqa: E731
+        except Exception:  # noqa: BLE001 — 量不到就用估的
+            logging.exception("讀取字型寬度失敗：%s", path)
+    _MEASURERS[font] = fn
+    return fn
 
 
 def fit_size(text: str, fs: float, pad_h: float) -> float:
@@ -280,7 +342,7 @@ def timed(lines: list[dict], offset: float) -> list[dict]:
             end = t + 0.5
         words = ([{**w, "t": w["t"] + offset, "end": w["end"] + offset} for w in ln["words"]]
                  if ln.get("words") and not ln.get("even") else None)   # even＝這句切成整句均分
-        out.append({"t": t, "end": end, "text": ln["text"], "words": words})
+        out.append({"t": t, "end": end, "text": ln["text"], "words": words, "ruby": ln.get("ruby") or []})
     return out
 
 
@@ -371,6 +433,8 @@ def build_ass(lines: list[dict], offset: float, style: dict, duration: float) ->
             pos = f"\\an9\\pos({W - pad_h:.0f},{y:.0f})"
         fs_tag = f"\\fs{size:.0f}" if abs(size - fs) > 0.5 else ""
         ev.append(f"Dialogue: 2,{_ts(a)},{_ts(v)},Lyric,,0,0,0,,{{{pos}{fs_tag}}}{_karaoke(ln, a, s)}")
+        if s["furigana"] and ln["ruby"]:
+            ev.extend(_ruby_events(ln, a, v, s, slot, y, size, pad_h))
 
     if s["countdown"]:
         for j, t in countdowns(L):
@@ -414,6 +478,51 @@ def _karaoke(ln: dict, a: float, s: dict) -> str:
         out.append(f"{{\\kf{dur}}}{_esc(w['text'])}")
         clock += dur
     return "".join(out)
+
+
+def _char_time(ln: dict, c: int, s: dict) -> float:
+    """掃色掃到第 c 個字（左邊界）的時間，跟字幕本身的 \\kf 一樣照字寬比例算。"""
+    if not s["sweep"]:
+        return ln["t"]
+    words = ln.get("words")
+    if words:
+        p = 0
+        for w in words:
+            n = len(w["text"])
+            if c < p + n:
+                tw = text_width(w["text"], 1.0)
+                frac = text_width(w["text"][: c - p], 1.0) / tw if tw > 0 else 0.0
+                return w["t"] + frac * (w["end"] - w["t"])
+            p += n
+        return words[-1]["end"]
+    tw = text_width(ln["text"], 1.0)
+    frac = text_width(ln["text"][:c], 1.0) / tw if tw > 0 else 0.0
+    return ln["t"] + frac * (ln["end"] - ln["t"])
+
+
+def _ruby_events(ln: dict, a: float, v: float, s: dict, slot: int, y: float, size: float, pad_h: float) -> list[str]:
+    """漢字上方的假名：每一段一個字幕，置中對在那段漢字上面；掃色時間＝下面那段漢字被掃過的時間。"""
+    meas = measurer(s["font"])
+    text = ln["text"]
+    total = meas(text, size)
+    left = pad_h if slot == 0 else W - pad_h - total
+    rsz = size * s["rubySize"] / 100
+    bottom = y + size * 0.15
+    bord = max(1, round(s["outline"] * 0.6)) if s["outline"] else 0
+    cs = lambda x: max(0, int(round(x * 100)))  # noqa: E731
+    out = []
+    for r in ln["ruby"]:
+        if not r.get("r"):
+            continue
+        cx = left + meas(text[: r["s"]], size) + meas(text[r["s"]:r["e"]], size) / 2
+        st, en = _char_time(ln, r["s"], s), _char_time(ln, r["e"], s)
+        if s["sweep"]:
+            k = f"{{\\k{cs(st - a)}}}{{\\kf{max(1, cs(en - a) - cs(st - a))}}}"
+        else:
+            k = f"{{\\k{cs(ln['t'] - a)}}}{{\\k1}}"
+        out.append(f"Dialogue: 3,{_ts(a)},{_ts(v)},Lyric,,0,0,0,,"
+                   f"{{\\an2\\pos({cx:.1f},{bottom:.1f})\\fs{rsz:.1f}\\bord{bord}}}{k}{_esc(r['r'])}")
+    return out
 
 
 def _merge(spans: list[tuple[float, float]], join: float = 0.4) -> list[tuple[float, float]]:
@@ -581,7 +690,12 @@ def render(song: Song, *, out_dir: Optional[Path] = None, also_lrc: Optional[boo
         if cancel and cancel.cancelled:
             raise Cancelled("已取消")
         duration = float(ffmpeg.probe(wav).get("duration") or song.meta.get("duration") or 0)
-        (tmp / "k.ass").write_text(build_ass(lyr["lines"], lyr["offset"], style, duration), encoding="utf-8-sig")
+        lines = lyr["lines"]
+        if style.get("furigana") and any(ln.get("ruby") is None for ln in lines):
+            from . import furigana      # 還沒產生讀音的句子（例如剛改過字）：輸出前補上
+            if furigana.available():
+                lines, _ = furigana.fill(lines)
+        (tmp / "k.ass").write_text(build_ass(lines, lyr["offset"], style, duration), encoding="utf-8-sig")
         _font_dir(tmp, style["font"])
         bg = resolve_bg(song, st["background"])
         progress(4, "準備背景")

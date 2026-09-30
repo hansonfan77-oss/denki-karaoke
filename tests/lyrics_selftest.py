@@ -239,6 +239,34 @@ def karaoke_video_tests(r, make_test_video) -> None:
     r.check("樣式開關（不用底板、不倒數、不掃色）", "Dialogue: 0," not in no_plate and "Dialogue: 1," not in no_plate
             and "\\kf" not in no_plate, "都有作用")
 
+    # v0.7.0：漢字標假名
+    from karaoke import furigana
+    if furigana.available():
+        got = furigana.auto_line("夜の街に灯りがともる")
+        pairs = [("夜の街に灯りがともる"[x["s"]:x["e"]], x["r"]) for x in got]
+        r.check("自動標假名（送り仮名分開）", pairs == [("夜", "よる"), ("街", "まち"), ("灯", "あか")], str(pairs))
+        mine = [{"t": 1.0, "end": 3.0, "text": "本気で走る", "ruby": [{"s": 0, "e": 2, "r": "まじ", "m": True}]},
+                {"t": 4.0, "end": 6.0, "text": "君の声"}]
+        filled, n = furigana.fill(mine, redo=True)
+        r.check("重新標音保留手改的讀音", filled[0]["ruby"][0] == {"s": 0, "e": 2, "r": "まじ", "m": True}
+                and [x["r"] for x in filled[1]["ruby"]] == ["きみ", "こえ"], f"改了 {n} 句")
+    else:
+        r.info("   （這台沒有安裝日文讀音元件，略過自動標音檢查）")
+    bad = furigana.clean_ruby([{"s": 0, "e": 1, "r": "よ"}, {"s": 0, "e": 2, "r": "x"}, {"s": 5, "e": 99, "r": "y"},
+                               {"s": 2, "e": 3, "r": "", "m": True}, {"s": 3, "e": 4, "r": ""}], "夜の街に")
+    r.check("讀音存檔檢查（重疊、超出範圍丟掉）", bad == [{"s": 0, "e": 1, "r": "よ"}, {"s": 2, "e": 3, "r": "", "m": True}],
+            str(bad))
+    rl = [{"t": 2.0, "end": 4.0, "text": "夜の街", "ruby": [{"s": 0, "e": 1, "r": "よる"}, {"s": 2, "e": 3, "r": "まち"}]}]
+    fst = {**kvideo.DEFAULT_STYLE, "furigana": True}
+    rass = kvideo.build_ass(rl, 0, fst, 10).splitlines()
+    rub = [x for x in rass if x.startswith("Dialogue: 3,")]
+    g0, g1 = kvideo.geometry(kvideo.DEFAULT_STYLE), kvideo.geometry(fst)
+    r.check("假名字幕：每段一個、跟著掃色、版面留位置", len(rub) == 2 and "よる" in rub[0] and "\\kf" in rub[1]
+            and g1["plateH"] > g0["plateH"] and not [x for x in kvideo.build_ass(rl, 0, kvideo.DEFAULT_STYLE, 10).splitlines()
+                                                     if x.startswith("Dialogue: 3,")],
+            f"{len(rub)} 段假名，底板 {g0['plateH']:.0f} → {g1['plateH']:.0f}")
+    r.check("字幕大小上限 140", kvideo.normalize_style({"size": 200})["size"] == 140, "")
+
     with tempfile.TemporaryDirectory(prefix="denki-kv-test-") as tmp:
         tmp = Path(tmp)
         src = tmp / "卡拉 測試!.mp4"

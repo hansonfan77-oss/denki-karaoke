@@ -7,7 +7,7 @@
  *   前面 3 秒顯示倒數點點 ●●●（開頭第一句也一樣）。
  * - 掃色：整句均分（從開始到結束等速掃過去），逐字打點之後再做。
  */
-import type { LyricLine, WordTime } from '../api'
+import type { LyricLine, RubyItem, WordTime } from '../api'
 
 export const LEAD_MAX = 8        // 一般情況最多提前幾秒出現
 export const GAP = 5             // 空檔多長算間奏
@@ -15,7 +15,7 @@ export const LEAD_AFTER_GAP = 4  // 間奏後提前幾秒出現
 export const HOLD = 1.2          // 唱完之後留多久（間奏前）
 export const COUNTDOWN = 3       // 倒數點點秒數
 
-export interface TimedLine { t: number; end: number; text: string; words: WordTime[] | null }
+export interface TimedLine { t: number; end: number; text: string; words: WordTime[] | null; ruby: RubyItem[] }
 
 /** 加上整體位移，並補好每一句的結束時間（沒有結束時間：到下一句開始，最長 6 秒）。 */
 export function timed(lines: LyricLine[], offset: number): TimedLine[] {
@@ -25,7 +25,7 @@ export function timed(lines: LyricLine[], offset: number): TimedLine[] {
     let end = ln.end != null ? ln.end + offset : Math.min(next - 0.05, t + 6)
     if (!(end > t)) end = t + 0.5
     const words = ln.words?.length && !ln.even ? ln.words.map(w => ({ ...w, t: w.t + offset, end: w.end + offset })) : null
-    return { t, end, text: ln.text, words }
+    return { t, end, text: ln.text, words, ruby: ln.ruby ?? [] }
   })
 }
 
@@ -205,7 +205,11 @@ export interface KStyle {
   countdown: boolean
   sweep: boolean
   sweepWord: boolean
+  furigana: boolean   // 漢字上方標假名（v0.7.0）
+  rubySize: number    // 假名大小＝字幕大小的幾 %
 }
+
+export const SIZE_MAX = 140
 
 export const VW = 1920, VH = 1080
 
@@ -213,13 +217,15 @@ export function geometry(s: KStyle) {
   const fs = s.size
   const padV = fs * 0.45, padH = Math.max(60, fs * 1.1)
   const dotsH = fs * 0.5, lineH = fs * 1.25, gap = fs * 0.25
-  const plateH = 2 * padV + 2 * (dotsH + lineH) + gap
+  const rubyH = s.furigana ? fs * (s.rubySize ?? 45) / 100 * 1.15 : 0   // 假名那一列
+  const row = dotsH + rubyH + lineH
+  const plateH = 2 * padV + 2 * row + gap
   const top = s.position === 'bottom' ? VH * 0.96 - plateH : (VH - plateH) / 2
   const slots = [0, 1].map(k => {
-    const y0 = top + padV + k * (dotsH + lineH + gap)
-    return { dots: y0, line: y0 + dotsH }
+    const y0 = top + padV + k * (row + gap)
+    return { dots: y0, line: y0 + dotsH + rubyH }
   })
-  return { fs, padH, plateTop: top, plateH, lineH, slots }
+  return { fs, padH, plateTop: top, plateH, lineH, rubyH, slots }
 }
 
 function charW(ch: string): number {
@@ -248,6 +254,15 @@ export function plateVisible(v: StageView): boolean {
 
 // ---------------- 貼上中日對照歌詞時：自動略過中文翻譯、作詞作曲資訊
 const CREDIT = /^(作詞|作曲|編曲|作词|编曲|歌|唄|Vocal|Lyrics|Music)\s*[:：／/]/i
+/** 漢字（含 々 〆 ヶ）的連續段落 [開始, 結束) */
+export function kanjiRuns(text: string): [number, number][] {
+  const out: [number, number][] = []
+  const re = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆ヶ]+/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text))) out.push([m.index, m.index + m[0].length])
+  return out
+}
+
 function kanaCount(s: string) { let n = 0; for (const ch of s) { const o = ch.codePointAt(0) ?? 0; if (o >= 0x3040 && o <= 0x30ff) n++ } return n }
 function hanCount(s: string) { let n = 0; for (const ch of s) { const o = ch.codePointAt(0) ?? 0; if (o >= 0x4e00 && o <= 0x9fff) n++ } return n }
 

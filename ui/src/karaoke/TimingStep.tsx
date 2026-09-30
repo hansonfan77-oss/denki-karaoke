@@ -166,7 +166,7 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
     if (!editing) return
     const text = editing.text.trim()
     if (text && text !== lines[editing.i].text) {
-      edit({ lines: lines.map((l, k) => (k === editing.i ? { ...l, text, words: null, even: null } : l)) })   // 改了字，逐字時間對不上了 → 這句改回整句均分
+      edit({ lines: lines.map((l, k) => (k === editing.i ? { ...l, text, words: null, even: null, ruby: null } : l)) })   // 改了字，逐字時間對不上了 → 這句改回整句均分
     }
     setEditing(null)
   }
