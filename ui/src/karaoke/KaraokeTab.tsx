@@ -11,7 +11,7 @@ type Step = 'lyrics' | 'timing' | 'style' | 'export'
 const STEPS: { id: Step; label: string }[] = [
   { id: 'lyrics', label: '選歌與歌詞' },
   { id: 'timing', label: '對時間' },
-  { id: 'style', label: '字幕樣式' },
+  { id: 'style', label: '樣式與預覽' },
   { id: 'export', label: '輸出' },
 ]
 

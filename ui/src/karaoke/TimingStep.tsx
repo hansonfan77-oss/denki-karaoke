@@ -295,8 +295,7 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
           </div>
         </div>
         <div className="muted small kt-help">
-          快捷鍵：<b>空白鍵</b> 播放；播放中按空白鍵＝把選取的句子設成「現在」，並跳到下一句（跟著歌一句一句點）·
-          <b>↑↓</b> 選句 · <b>←→</b> 前後 2 秒 · <b>Ctrl+Z</b> 復原
+          其他快捷鍵：<b>↑↓</b> 選句 · <b>←→</b> 前後 2 秒 · <b>Ctrl+Z</b> 復原
         </div>
       </div>
 
@@ -306,6 +305,9 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
           <span className="muted small">{lines.length} 句 · {SOURCE_LABEL[initial.source] ?? initial.source}</span>
           <div className="spacer" />
           <button className="btn sm" onClick={doUndo} disabled={!undo.current.length}>復原</button>
+        </div>
+        <div className="kt-tip">
+          <b>怎麼對：</b>點一句選取 → 按播放 → 歌手唱到這句時按<kbd>空白鍵</kbd>，這句就設成現在，並自動跳到下一句，可以跟著歌一句一句點下去。
         </div>
         <div className="kt-list" ref={listRef}>
           {lines.map((ln, i) => {
@@ -345,7 +347,7 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
             {saveState === 'saving' ? '儲存中…' : saveState === 'dirty' ? '有修改，稍後自動儲存' : saveState === 'error' ? `儲存失敗：${saveErr}` : '已自動儲存'}
           </span>
           <div className="spacer" />
-          <button className="btn primary" disabled={!onNext} onClick={async () => { if (saveState === 'dirty') await saveNow(); onNext?.() }}>下一步：字幕樣式</button>
+          <button className="btn primary" disabled={!onNext} onClick={async () => { if (saveState === 'dirty') await saveNow(); onNext?.() }}>下一步：樣式與預覽</button>
         </div>
       </div>
     </div>

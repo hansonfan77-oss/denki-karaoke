@@ -1,6 +1,6 @@
 /** ③ 字幕樣式與背景：右邊改設定，左邊邊播邊看（跟輸出的 MP4 同一套版面） */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { api, fmtTime, songFileUrl, type KaraokeSettings, type Lyrics, type Song } from '../api'
+import { api, fmtTime, keyLabel, MODE_LABEL, songFileUrl, type KaraokeSettings, type Lyrics, type ModeId, type Song } from '../api'
 import { Pause, Play } from '../icons'
 import LyricsStage from './LyricsStage'
 import { timed, type KStyle } from './lyricsView'
@@ -23,10 +23,11 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
   const slug = song.slug
   const [style, setStyle] = useState<KStyle>(settings.style)
   const [bg, setBg] = useState(settings.background)
+  const [audio, setAudio] = useState(settings.audio)
   const [dirty, setDirty] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [imgStamp, setImgStamp] = useState(String(Date.now()))
-  const { engine, loadP, err: engineErr, pos, playing } = useKaraokeEngine(slug, settings.audio.mode, settings.audio.key, settings.audio.guide)
+  const { engine, loadP, err: engineErr, pos, playing } = useKaraokeEngine(slug, audio.mode, audio.key, audio.guide)
   const leftRef = useRef<HTMLDivElement>(null)
   const [stageW, setStageW] = useState(720)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -35,7 +36,7 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
   useLayoutEffect(() => {
     const el = leftRef.current
     if (!el) return
-    const fit = () => setStageW(Math.max(320, Math.floor(Math.min(el.clientWidth, ((el.clientHeight - 130) * 16) / 9))))
+    const fit = () => setStageW(Math.max(320, Math.floor(Math.min(el.clientWidth, ((el.clientHeight - 200) * 16) / 9))))
     const ro = new ResizeObserver(fit)
     ro.observe(el)
     return () => ro.disconnect()
@@ -44,15 +45,16 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
   // 改了就自動存（也記成下一首歌的預設樣式）
   const setS = (patch: Partial<KStyle>) => { setStyle(s => ({ ...s, ...patch })); setDirty(true) }
   const setB = (patch: Partial<typeof bg>) => { setBg(b => ({ ...b, ...patch })); setDirty(true) }
+  const setA = (patch: Partial<typeof audio>) => { setAudio(a => ({ ...a, ...patch })); setDirty(true) }
   const save = useCallback(async () => {
     try {
-      onSettings(await api.saveKaraoke(slug, { style, background: bg }))
+      onSettings(await api.saveKaraoke(slug, { style, background: bg, audio }))
       setDirty(false)
       setErr(null)
     } catch (e) {
       setErr((e as Error).message)
     }
-  }, [slug, style, bg, onSettings])
+  }, [slug, style, bg, audio, onSettings])
   useEffect(() => {
     if (!dirty) return
     const t = setTimeout(save, 500)
@@ -124,8 +126,24 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
           <span className="time muted">{fmtTime(duration)}</span>
           <button className="btn sm" disabled={!engine} onClick={() => engine?.seek(Math.max(0, firstLine - 5))}>到第一句</button>
         </div>
+        <div className="card kaudio">
+          <b className="kaudio-h">伴奏</b>
+          <div className="seg">
+            {settings.analyzedModes.map((m: ModeId) => (
+              <button key={m} className={audio.mode === m ? 'on' : ''} onClick={() => setA({ mode: m })}>{MODE_LABEL[m]}</button>
+            ))}
+          </div>
+          <span className="kaudio-lab">Key</span>
+          <button className="icon-btn" disabled={audio.key <= -12} onClick={() => setA({ key: audio.key - 1 })} aria-label="降一個 Key">−</button>
+          <b className="kaudio-val">{keyLabel(audio.key)}</b>
+          <button className="icon-btn" disabled={audio.key >= 12} onClick={() => setA({ key: audio.key + 1 })} aria-label="升一個 Key">+</button>
+          <span className="kaudio-lab">導唱</span>
+          <input type="range" min={0} max={100} step={5} value={audio.guide} aria-label="導唱"
+            onChange={e => setA({ guide: Number(e.target.value) })} />
+          <b className="kaudio-val">{audio.guide}%</b>
+        </div>
         {!engine && <div className={`notice ${engineErr ? 'error' : 'warn'}`}>{engineErr ?? `載入歌曲中…${loadP?.stage === 'download' ? ` ${Math.round(loadP.ratio * 100)}%` : ''}`}</div>}
-        <div className="muted small">預覽跟輸出的影片用同一套版面；字型的細微差異以輸出為準。</div>
+        <div className="muted small">這裡就是最終成品：畫面、字幕、伴奏（模式、Key、導唱）都跟輸出的 MP4 一樣。</div>
       </div>
 
       <div className="card kt-right ksty">

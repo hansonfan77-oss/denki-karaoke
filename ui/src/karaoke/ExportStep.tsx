@@ -1,11 +1,10 @@
 /** ④ 輸出：伴奏設定（模式、Key、導唱）、存放位置、同時輸出 .lrc → 1080p MP4（字幕燒進畫面） */
 import { useEffect, useRef, useState } from 'react'
-import { api, desktop, keyLabel, MODE_LABEL, type KaraokeJob, type KaraokeSettings, type Lyrics, type ModeId, type Song } from '../api'
+import { api, desktop, keyLabel, MODE_LABEL, type KaraokeJob, type KaraokeSettings, type Lyrics, type Song } from '../api'
 import { Check, Folder } from '../icons'
 import { fmtOffset } from './lyricsView'
 
 const BG_LABEL: Record<string, string> = { video: '原影片', color: '單色', image: '自選圖片', cover: '模糊封面' }
-const KEY_MIN = -12, KEY_MAX = 12
 
 export default function ExportStep({ song, lyrics, settings, onSettings, onBack }: {
   song: Song
@@ -15,21 +14,10 @@ export default function ExportStep({ song, lyrics, settings, onSettings, onBack 
   onBack: () => void
 }) {
   const slug = song.slug
-  const [audio, setAudio] = useState(settings.audio)
-  const [dirty, setDirty] = useState(false)
   const [job, setJob] = useState<KaraokeJob | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const alive = useRef(true)
   useEffect(() => () => { alive.current = false }, [])
-
-  const setA = (patch: Partial<typeof audio>) => { setAudio(a => ({ ...a, ...patch })); setDirty(true) }
-  useEffect(() => {
-    if (!dirty) return
-    const t = setTimeout(async () => {
-      try { onSettings(await api.saveKaraoke(slug, { audio })); setDirty(false) } catch (e) { setErr((e as Error).message) }
-    }, 400)
-    return () => clearTimeout(t)
-  }, [dirty, audio, slug, onSettings])
 
   const pickDir = async () => {
     const d = desktop()
@@ -44,7 +32,6 @@ export default function ExportStep({ song, lyrics, settings, onSettings, onBack 
   const start = async () => {
     setErr(null)
     try {
-      if (dirty) { onSettings(await api.saveKaraoke(slug, { audio })); setDirty(false) }
       let j = await api.renderKaraoke(slug)
       setJob(j)
       while (j.state === 'running') {
@@ -73,32 +60,9 @@ export default function ExportStep({ song, lyrics, settings, onSettings, onBack 
           <div><span>歌詞</span>{lyrics.lines.length} 句 · 整體 {fmtOffset(lyrics.offset)}</div>
           <div><span>字幕</span>{font} · {s.size} · {s.plate === 'none' ? '無底板' : `${s.plate === 'black' ? '黑' : '白'}色底板 ${s.plateOpacity}%`}</div>
           <div><span>背景</span>{BG_LABEL[settings.resolvedBg.kind]}</div>
+          <div><span>伴奏</span>{MODE_LABEL[settings.audio.mode]} · {keyLabel(settings.audio.key)} · 導唱 {settings.audio.guide}%</div>
         </div>
-
-        <div className="kx-audio">
-          <div className="ksty-h">伴奏（預設沿用「伴奏處理」最後一次輸出的設定）</div>
-          <div className="kx-row">
-            <span className="kx-lab">分離模式</span>
-            <div className="seg">
-              {settings.analyzedModes.map((m: ModeId) => (
-                <button key={m} className={audio.mode === m ? 'on' : ''} disabled={running} onClick={() => setA({ mode: m })}>{MODE_LABEL[m]}</button>
-              ))}
-            </div>
-          </div>
-          <div className="kx-row">
-            <span className="kx-lab">Key</span>
-            <button className="icon-btn" disabled={running || audio.key <= KEY_MIN} onClick={() => setA({ key: audio.key - 1 })} aria-label="降一個 Key">−</button>
-            <b className="kx-key">{keyLabel(audio.key)}</b>
-            <button className="icon-btn" disabled={running || audio.key >= KEY_MAX} onClick={() => setA({ key: audio.key + 1 })} aria-label="升一個 Key">+</button>
-            {audio.key !== 0 && <button className="linkbtn" disabled={running} onClick={() => setA({ key: 0 })}>回原 Key</button>}
-          </div>
-          <div className="kx-row">
-            <span className="kx-lab">導唱</span>
-            <input type="range" min={0} max={100} step={5} value={audio.guide} disabled={running} aria-label="導唱"
-              onChange={e => setA({ guide: Number(e.target.value) })} style={{ maxWidth: 280 }} />
-            <b className="kx-key">{audio.guide}%</b>
-          </div>
-        </div>
+        <div className="muted small">內容都在上一步「樣式與預覽」決定好了，要改就按「上一步」。</div>
 
         <div className="kx-row kx-out">
           <span className="kx-lab">存到</span>
@@ -138,7 +102,7 @@ export default function ExportStep({ song, lyrics, settings, onSettings, onBack 
         )}
 
         <div className="kx-foot">
-          <button className="btn" onClick={onBack} disabled={running}>上一步：字幕樣式</button>
+          <button className="btn" onClick={onBack} disabled={running}>上一步：樣式與預覽</button>
           <div className="spacer" />
           {running
             ? <button className="btn" onClick={() => job && api.cancelKaraoke(job.id)}>取消</button>
