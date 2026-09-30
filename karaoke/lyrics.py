@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import re
@@ -388,6 +389,74 @@ def map_words_to_lines(words: list[dict], lines: list[str]) -> list[dict]:
         out.append({"t": round(start, 3), "end": round(end, 3), "text": text, "words": segs})
         prev_end = end
         pos += n
+    # 修正 AI 找不到的字，句子的開始／結束也跟著修正後的字
+    for i, ln in enumerate(out):
+        if not ln.get("words"):
+            continue
+        limit = out[i + 1]["t"] if i + 1 < len(out) else math.inf
+        fixed = repair_words(ln["words"], ln["t"], limit)
+        if not fixed:
+            ln.pop("words")
+            continue
+        ln["words"] = fixed
+        ln["t"] = fixed[0]["t"]
+        ln["end"] = round(max(fixed[-1]["end"], ln["t"] + 0.3), 3)
+    return out
+
+
+TAIL_JUMP = 2.5       # 句尾的字比前一個字晚這麼多才出現 → 多半是 AI 找不到，被丟到最後面（例如整首的結尾）
+
+
+def repair_words(segs: list[dict], line_t: float, limit: float) -> Optional[list[dict]]:
+    """修正 AI 逐字時間裡找不到的字：
+    - 長度幾乎是 0 的字（AI 沒聽到）
+    - 句尾突然跳到很後面的字（AI 找不到，被放到整首最後）
+    做法：前後有正常的字就平均分配中間的空檔；句尾的就接在前一個字後面，每個字約 0.3 秒（最多 2 秒、不超過下一句）。
+    整句都找不到就回傳 None（這句改用整句均分）。"""
+    if not segs:
+        return None
+    n = len(segs)
+    weight = [max(1, len(norm_chars(s["text"]))) for s in segs]
+    bad = [s["end"] - s["t"] < 0.06 or s["t"] >= limit for s in segs]
+    # 句尾跳走的字
+    last_good = max((i for i in range(n) if not bad[i]), default=-1)
+    while last_good > 0:
+        prev = max((i for i in range(last_good) if not bad[i]), default=-1)
+        if prev >= 0 and segs[last_good]["t"] - segs[prev]["end"] > TAIL_JUMP:
+            bad[last_good] = True
+            last_good = prev
+        else:
+            break
+    if all(bad):
+        return None
+    out = [dict(s) for s in segs]
+    i = 0
+    while i < n:
+        if not bad[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and bad[j]:
+            j += 1
+        a = out[i - 1] if i > 0 else None
+        b = out[j] if j < n else None
+        w_sum = sum(weight[i:j])
+        start = a["end"] if a else line_t
+        if b is not None:
+            end = b["t"]
+        else:
+            end = min(start + min(2.0, max(0.3, 0.3 * w_sum)), limit - 0.05)
+        if end - start < 0.08 * w_sum and a is not None:      # 沒空間：分前一個字的一半
+            mid = a["t"] + (a["end"] - a["t"]) * 0.5
+            a["end"] = round(mid, 3)
+            start = mid
+        end = max(end, start + 0.05 * w_sum)
+        clock = start
+        for k in range(i, j):
+            d = (end - start) * weight[k] / w_sum
+            out[k]["t"], out[k]["end"] = round(clock, 3), round(clock + d, 3)
+            clock += d
+        i = j
     return out
 
 

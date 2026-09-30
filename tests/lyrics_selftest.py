@@ -81,6 +81,10 @@ def lyrics_tests(r, make_test_video) -> None:
              {"text": "、君", "start": 5.0, "end": 5.4}, {"text": "の声", "start": 5.4, "end": 6.0}]
     m = lyrics.map_words_to_lines(words, ["街の灯り", "君の声"])
     got = [(x["t"], x["end"]) for x in m]
+    fixed = lyrics.repair_words([{"text": "あ", "t": 1.0, "end": 1.4}, {"text": "い", "t": 1.4, "end": 1.4},
+                                 {"text": "う", "t": 1.4, "end": 1.8}, {"text": "え！", "t": 240.0, "end": 240.0}], 1.0, 9.0)
+    r.check("修正 AI 找不到的字", bool(fixed) and all(w["end"] - w["t"] >= 0.05 for w in fixed) and fixed[-1]["end"] < 3,
+            "長度 0 的字分到空檔、被丟到整首最後的字接回句尾")
     r.check("逐字時間對應回每一句", got == [(1.0, 2.2), (5.0, 6.0)], f"{got}")
 
     # 4. LRCLIB（本機假伺服器）

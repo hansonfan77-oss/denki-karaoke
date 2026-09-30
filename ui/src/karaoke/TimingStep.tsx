@@ -333,6 +333,11 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
             ? <span className="kt-badge">逐字掃色（AI 精修）：{wordLines}/{lines.length} 句</span>
             : <span className="kt-badge off">目前是整句均分掃色</span>}
           <div className="spacer" />
+          {wordLines > 0 && (
+            <button className="btn sm" disabled={!!refine && !refine.err}
+              title="刪掉 AI 逐字時間，整首改回整句均分（可以按 Ctrl+Z 復原）"
+              onClick={() => edit({ lines: state.current.lines.map(l => ({ ...l, words: null })) })}>改回整句均分</button>
+          )}
           <button className="btn sm" onClick={startRefine} disabled={!!refine && !refine.err}
             title="AI 聽人聲，補上每個字的時間；每句的開始時間不會改">
             {wordLines > 0 ? '重新精修' : '用 AI 精修掃色'}
