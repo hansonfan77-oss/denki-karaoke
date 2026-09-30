@@ -230,8 +230,12 @@ function PasteTab({ song, text, setText, onAligned, onManual }: {
         {filtered.dropped > 0 && (
           <label className="check ks-filter">
             <input type="checkbox" checked={jaOnly} onChange={e => setJaOnly(e.target.checked)} disabled={running} />
-            只保留日文：略過 {filtered.dropped} 行中文翻譯、作詞作曲資訊（中日對照的歌詞可以整份直接貼）
+            只保留日文：送去對時間時略過 {filtered.dropped} 行中文翻譯、作詞作曲資訊（{all.length} 行 → {filtered.keep.length} 句）
           </label>
+        )}
+        {filtered.dropped > 0 && jaOnly && (
+          <button className="btn sm" style={{ alignSelf: 'flex-start' }} disabled={running}
+            onClick={() => setText(filtered.keep.join('\n'))}>把略過的行從上面的文字框刪掉（看得到結果）</button>
         )}
       </div>
       <div className="ks-col">
