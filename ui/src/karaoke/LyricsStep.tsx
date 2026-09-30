@@ -45,10 +45,17 @@ export default function LyricsStep({ song, existing, titleGuess, onUse, onContin
           <button className="btn primary" onClick={onContinue}>繼續對時間</button>
         </div>
       )}
+      <div className="ks-src-head">歌詞從哪裡來？選一種：</div>
       <div className="ks-tabs" role="tablist">
-        {([['lrclib', 'LRCLIB 搜尋'], ['paste', '貼上歌詞（AI 對時間）'], ['lrc', '匯入 LRC 檔']] as [Tab, string][]).map(([id, label]) => (
+        {([
+          ['lrclib', '搜尋歌詞', '線上找附時間的歌詞（LRCLIB）'],
+          ['paste', '貼上歌詞', 'AI 聽人聲自動對時間'],
+          ['lrc', '匯入 LRC 檔', '已經有附時間的歌詞檔'],
+        ] as [Tab, string, string][]).map(([id, label, sub]) => (
           <button key={id} role="tab" aria-selected={tab === id} className={`ks-tab ${tab === id ? 'on' : ''}`}
-            onClick={() => setTab(id)}>{label}</button>
+            onClick={() => setTab(id)}>
+            <b>{label}</b><span>{sub}</span>
+          </button>
         ))}
       </div>
       <div className="ks-body">
@@ -108,10 +115,10 @@ function LrclibTab({ song, titleGuess, onUseSynced, onUsePlain }: {
     <div className="ks-split">
       <div className="ks-col">
         <form className="ks-search" onSubmit={e => { e.preventDefault(); search() }}>
-          <label className="ks-field" style={{ flex: 1 }}>歌名
+          <label className="ks-field">歌名
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="歌名" />
           </label>
-          <label className="ks-field" style={{ width: 150 }}>歌手（可空白）
+          <label className="ks-field">歌手（可空白）
             <input value={artist} onChange={e => setArtist(e.target.value)} />
           </label>
           <button className="btn primary" type="submit" disabled={busy || !title.trim()}>{busy ? '搜尋中…' : '搜尋'}</button>
