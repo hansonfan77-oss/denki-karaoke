@@ -230,6 +230,27 @@ def lyrics_path(song: Song):
     return song.dir / "lyrics.json"
 
 
+def clean_words(words, text: str) -> Optional[list[dict]]:
+    """逐字時間（AI 精修）：[{text, t, end}]，每段的文字接起來要剛好等於整句，時間要照順序。不對就丟掉（改回整句均分）。"""
+    if not isinstance(words, list) or not words:
+        return None
+    out = []
+    for w in words:
+        try:
+            seg = {"text": str(w["text"]), "t": round(float(w["t"]), 3), "end": round(float(w["end"]), 3)}
+        except (KeyError, TypeError, ValueError):
+            return None
+        if seg["end"] < seg["t"]:
+            seg["end"] = seg["t"]
+        out.append(seg)
+    if "".join(s["text"] for s in out) != text:
+        return None
+    for a, b in zip(out, out[1:]):
+        if b["t"] < a["t"] - 0.001:
+            return None
+    return out
+
+
 def clean_lines(lines: list[dict]) -> list[dict]:
     out = []
     for ln in lines:
@@ -247,7 +268,11 @@ def clean_lines(lines: list[dict]) -> list[dict]:
             end = None
         if end is not None and end <= t:
             end = None
-        out.append({"t": t, "end": end, "text": text[:200]})
+        item = {"t": t, "end": end, "text": text[:200]}
+        words = clean_words(ln.get("words"), item["text"])
+        if words:
+            item["words"] = words
+        out.append(item)
     out.sort(key=lambda x: x["t"])
     return out
 
@@ -299,21 +324,26 @@ def norm_chars(s: str) -> str:
     return "".join(ch for ch in s if unicodedata.category(ch)[0] in ("L", "N"))
 
 
+def _is_key(ch: str) -> bool:
+    return bool(norm_chars(ch))
+
+
 def map_words_to_lines(words: list[dict], lines: list[str]) -> list[dict]:
-    """AI 回傳的逐字（詞）時間 → 每一句的開始／結束。
+    """AI 回傳的逐字（詞）時間 → 每一句的開始／結束，以及每一句的逐字時間（words）。
 
     把兩邊都攤平成「字元串」後依順序對應，不依賴 AI 怎麼斷句。兩邊字數對不上時（極少數：
     斷詞器改了字），用比例換算位置，仍然保持順序。
-    沒有可對應字元的句子（例如只有「…」）沿用上一句的結束時間。
+    每句的 words 是把原句切成幾段（段落文字接起來＝原句，標點跟著前一段），每段有自己的開始／結束。
+    沒有可對應字元的句子（例如只有「…」）沿用上一句的結束時間、沒有逐字資料。
     """
-    stream: list[tuple[float, float]] = []
-    for w in words:
+    stream: list[tuple[float, float, int]] = []     # (開始, 結束, 第幾個詞)
+    for wi, w in enumerate(words):
         try:
             ws, we = float(w["start"]), float(w["end"])
         except (KeyError, TypeError, ValueError):
             continue
         for _ in norm_chars(str(w.get("text", ""))):
-            stream.append((ws, we))
+            stream.append((ws, max(ws, we), wi))
     lens = [len(norm_chars(ln)) for ln in lines]
     total = sum(lens)
     out: list[dict] = []
@@ -325,12 +355,43 @@ def map_words_to_lines(words: list[dict], lines: list[str]) -> list[dict]:
         if n == 0:
             out.append({"t": round(prev_end, 3), "end": None, "text": text})
             continue
-        a = min(len(stream) - 1, int(round(pos * scale)))
-        b = min(len(stream) - 1, max(a, int(round((pos + n) * scale)) - 1))
-        start, end = stream[a][0], stream[b][1]
+        # 這句每個「算數的字」對到字元串的哪一格
+        idx = [min(len(stream) - 1, int((pos + k) * scale)) for k in range(n)]
+        start, end = stream[idx[0]][0], stream[idx[-1]][1]
         if end <= start:
             end = start + 0.5
-        out.append({"t": round(start, 3), "end": round(end, 3), "text": text})
+        # 切段：同一個詞的字放同一段；標點、空白跟著前一段（句首的標點跟著第一段）
+        segs: list[dict] = []
+        k = 0
+        for ch in text:
+            if _is_key(ch) and k < n:
+                s = stream[idx[k]]
+                k += 1
+                if segs and segs[-1]["_w"] == s[2]:
+                    segs[-1]["text"] += ch
+                else:
+                    segs.append({"text": ch, "t": s[0], "end": s[1], "_w": s[2]})
+            elif segs:
+                segs[-1]["text"] += ch
+            else:
+                segs.append({"text": ch, "t": start, "end": start, "_w": -1})
+        # 句首只有標點的那段併進下一段
+        if len(segs) > 1 and segs[0]["_w"] == -1:
+            segs[1]["text"] = segs[0]["text"] + segs[1]["text"]
+            segs.pop(0)
+        prev_t = start
+        for sg in segs:
+            sg.pop("_w", None)
+            sg["t"] = round(max(sg["t"], prev_t), 3)
+            sg["end"] = round(max(sg["end"], sg["t"]), 3)
+            prev_t = sg["t"]
+        out.append({"t": round(start, 3), "end": round(end, 3), "text": text, "words": segs})
         prev_end = end
         pos += n
     return out
+
+
+def shift_words(words: Optional[list[dict]], delta: float) -> Optional[list[dict]]:
+    if not words:
+        return words
+    return [{**w, "t": round(w["t"] + delta, 3), "end": round(w["end"] + delta, 3)} for w in words]

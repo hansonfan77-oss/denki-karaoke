@@ -22,6 +22,7 @@ export default function KaraokeTab({ onGoAccomp }: { onGoAccomp: () => void }) {
   const [lyr, setLyr] = useState<{ slug: string; lyrics: Lyrics | null; titleGuess: string } | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [ks, setKs] = useState<KaraokeSettings | null>(null)
+  const [rev, setRev] = useState(0)   // AI 精修完 → 對時間畫面重新載入新的歌詞
 
   const reload = useCallback(() => api.songs().then(list => {
     setSongs(list)
@@ -122,8 +123,9 @@ export default function KaraokeTab({ onGoAccomp }: { onGoAccomp: () => void }) {
       )}
 
       {step === 'timing' && song && ready && lyr!.lyrics && (
-        <TimingStep key={song.slug} song={song} initial={lyr!.lyrics}
-          onBack={() => setStep('lyrics')} onSaved={onSaved} onNext={ks ? () => setStep('style') : undefined} />
+        <TimingStep key={`${song.slug}#${rev}`} song={song} initial={lyr!.lyrics}
+          onBack={() => setStep('lyrics')} onSaved={onSaved} onNext={ks ? () => setStep('style') : undefined}
+          onRefined={l => { onSaved(l); setRev(r => r + 1) }} />
       )}
       {step === 'style' && song && ready && lyr!.lyrics && ks && (
         <StyleStep key={song.slug} song={song} lyrics={lyr!.lyrics} settings={ks} onSettings={setKs}

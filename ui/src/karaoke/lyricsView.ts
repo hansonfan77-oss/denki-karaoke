@@ -7,7 +7,7 @@
  *   前面 3 秒顯示倒數點點 ●●●（開頭第一句也一樣）。
  * - 掃色：整句均分（從開始到結束等速掃過去），逐字打點之後再做。
  */
-import type { LyricLine } from '../api'
+import type { LyricLine, WordTime } from '../api'
 
 export const LEAD_MAX = 8        // 一般情況最多提前幾秒出現
 export const GAP = 5             // 空檔多長算間奏
@@ -15,7 +15,7 @@ export const LEAD_AFTER_GAP = 4  // 間奏後提前幾秒出現
 export const HOLD = 1.2          // 唱完之後留多久（間奏前）
 export const COUNTDOWN = 3       // 倒數點點秒數
 
-export interface TimedLine { t: number; end: number; text: string }
+export interface TimedLine { t: number; end: number; text: string; words: WordTime[] | null }
 
 /** 加上整體位移，並補好每一句的結束時間（沒有結束時間：到下一句開始，最長 6 秒）。 */
 export function timed(lines: LyricLine[], offset: number): TimedLine[] {
@@ -24,7 +24,8 @@ export function timed(lines: LyricLine[], offset: number): TimedLine[] {
     const next = i + 1 < lines.length ? lines[i + 1].t + offset : Infinity
     let end = ln.end != null ? ln.end + offset : Math.min(next - 0.05, t + 6)
     if (!(end > t)) end = t + 0.5
-    return { t, end, text: ln.text }
+    const words = ln.words?.length ? ln.words.map(w => ({ ...w, t: w.t + offset, end: w.end + offset })) : null
+    return { t, end, text: ln.text, words }
   })
 }
 
@@ -61,7 +62,23 @@ export interface StageView {
   current: number      // 正在唱（或最近唱過）的句子，-1 = 還沒開始
 }
 
-export function stageAt(L: TimedLine[], T: number): StageView {
+/** 逐字掃色：已唱的比例（照字寬加權，跟畫面上的位置一致） */
+function wordSweep(ln: TimedLine, T: number): number {
+  const ws = ln.words!
+  let total = 0
+  const widths = ws.map(w => { let x = 0; for (const ch of w.text) x += charW(ch); total += x; return x })
+  if (total <= 0) return 0
+  let done = 0
+  for (let k = 0; k < ws.length; k++) {
+    const w = ws[k]
+    if (T >= w.end) { done += widths[k]; continue }
+    if (T > w.t) done += widths[k] * ((T - w.t) / Math.max(0.01, w.end - w.t))
+    break
+  }
+  return Math.min(1, done / total)
+}
+
+export function stageAt(L: TimedLine[], T: number, wordMode = true): StageView {
   const slots: [SlotView | null, SlotView | null] = [null, null]
   let current = -1
   for (let j = 0; j < L.length; j++) {
@@ -70,7 +87,9 @@ export function stageAt(L: TimedLine[], T: number): StageView {
     if (a > T) break
     if (T >= vanish(L, j)) continue
     const ln = L[j]
-    const sweep = Math.min(1, Math.max(0, (T - ln.t) / (ln.end - ln.t)))
+    const sweep = wordMode && ln.words
+      ? wordSweep(ln, T)
+      : Math.min(1, Math.max(0, (T - ln.t) / (ln.end - ln.t)))
     slots[j % 2] = { index: j, text: ln.text, sweep, active: T >= ln.t && T < ln.end }
   }
   let countdown: StageView['countdown'] = null
@@ -133,23 +152,29 @@ export function splitPlain(text: string): string[] {
  * 後面比它早的往後推、前面比它晚的往前拉（至少差 0.3 秒）；結束時間跟著開始時間一起移動（長度不變），
  * 上一句的結束時間不能超過這一句的開始。
  */
+const shiftW = (ws: WordTime[] | null | undefined, d: number) =>
+  ws?.length ? ws.map(w => ({ ...w, t: Math.round((w.t + d) * 1000) / 1000, end: Math.round((w.end + d) * 1000) / 1000 })) : ws
+
 export function setStart(lines: LyricLine[], i: number, t: number): LyricLine[] {
   const out = lines.map(l => ({ ...l }))
   const old = out[i].t
   t = Math.max(0, Math.round(t * 1000) / 1000)
   const delta = t - old
   out[i].t = t
+  out[i].words = shiftW(out[i].words, delta)
   if (out[i].end != null) out[i].end = Math.round((out[i].end! + delta) * 1000) / 1000
   for (let k = i + 1; k < out.length; k++) {
     if (out[k].t > out[k - 1].t + 0.05) break
     const d = out[k - 1].t + 0.3 - out[k].t
     out[k].t = Math.round((out[k].t + d) * 1000) / 1000
+    out[k].words = shiftW(out[k].words, d)
     if (out[k].end != null) out[k].end = Math.round((out[k].end! + d) * 1000) / 1000
   }
   for (let k = i - 1; k >= 0; k--) {
     if (out[k].t < out[k + 1].t - 0.05) break
     const d = out[k].t - (out[k + 1].t - 0.3)
     out[k].t = Math.max(0, Math.round((out[k].t - d) * 1000) / 1000)
+    out[k].words = shiftW(out[k].words, -d)
     if (out[k].end != null) out[k].end = Math.round((out[k].end! - d) * 1000) / 1000
   }
   for (let k = 0; k < out.length - 1; k++) {
@@ -179,6 +204,7 @@ export interface KStyle {
   plateOpacity: number
   countdown: boolean
   sweep: boolean
+  sweepWord: boolean
 }
 
 export const VW = 1920, VH = 1080

@@ -98,10 +98,11 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
       ? <video ref={video} className="kbg" src={songFileUrl(slug, 'video')} muted playsInline preload="auto" />
       : <div className="kbg kbg-note">（這個影片格式在預覽裡播不出來，輸出時會用原影片畫面）</div>)
     : kind === 'cover' ? <img className="kbg kbg-blur" src={songFileUrl(slug, 'cover')} alt="" />
-      : kind === 'image' ? <img className="kbg" src={songFileUrl(slug, 'bg-image', imgStamp)} alt="" />
+      : kind === 'image' ? <ImageBg src={songFileUrl(slug, 'bg-image', imgStamp)} fit={bg.fit ?? 'fill'} scale={stageW / 1920} />
         : <div className="kbg" style={{ background: bg.color }} />
 
   const tl = useMemo(() => timed(lyrics.lines, lyrics.offset), [lyrics])
+  const hasWords = lyrics.lines.some(l => l.words?.length)
   const firstLine = tl[0]?.t ?? 0
   const duration = engine?.duration ?? song.duration ?? 0
 
@@ -176,7 +177,11 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
           </div>
           <div className="ksty-checks">
             <label className="check"><input type="checkbox" checked={style.countdown} onChange={e => setS({ countdown: e.target.checked })} />前奏／間奏倒數 ●●●</label>
-            <label className="check"><input type="checkbox" checked={style.sweep} onChange={e => setS({ sweep: e.target.checked })} />整句均分掃色</label>
+            <label className="check"><input type="checkbox" checked={style.sweep} onChange={e => setS({ sweep: e.target.checked })} />掃色</label>
+            <label className="check" title={hasWords ? '有 AI 逐字時間的句子跟著歌手的節奏掃色；關掉＝整句均分' : '這首歌還沒有 AI 逐字時間（到「對時間」按「用 AI 精修掃色」）'}>
+              <input type="checkbox" checked={style.sweepWord && hasWords} disabled={!style.sweep || !hasWords}
+                onChange={e => setS({ sweepWord: e.target.checked })} />逐字掃色（AI 精修）{!hasWords && '：尚未精修'}
+            </label>
           </div>
 
           <div className="ksty-h">字幕底板</div>
@@ -206,7 +211,17 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
             ))}
           </div>
           {kind === 'color' && <Swatches value={bg.color} options={BG_COLORS} onPick={c => setB({ color: c, kind: 'color' })} />}
-          {kind === 'image' && <button className="linkbtn" onClick={() => fileInput.current?.click()}>換一張圖片</button>}
+          {kind === 'image' && (
+            <div className="ksty-fit">
+              <span className="small muted">圖片顯示方式</span>
+              <div className="seg">
+                {([['fill', '填滿（裁切邊緣）'], ['fit', '完整顯示'], ['center', '置中（原尺寸）']] as const).map(([f, label]) => (
+                  <button key={f} className={(bg.fit ?? 'fill') === f ? 'on' : ''} onClick={() => setB({ fit: f })}>{label}</button>
+                ))}
+              </div>
+              <button className="linkbtn" onClick={() => fileInput.current?.click()}>換一張圖片</button>
+            </div>
+          )}
           <input ref={fileInput} type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" hidden
             onChange={e => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }} />
           {err && <div className="notice error">{err}</div>}
@@ -235,5 +250,24 @@ function Swatches({ value, options, onPick }: { value: string; options: string[]
         {!custom && '+'}
       </label>
     </div>
+  )
+}
+
+/** 自選圖片背景：填滿（裁切）／完整顯示／置中（原尺寸），後兩種空白處用同一張圖模糊補滿（跟輸出一樣） */
+function ImageBg({ src, fit, scale }: { src: string; fit: 'fill' | 'fit' | 'center'; scale: number }) {
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null)
+  if (fit === 'fill') return <img className="kbg" src={src} alt="" />
+  let fg: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'contain' }
+  if (fit === 'center' && nat) {
+    const k = Math.min(1, 1920 / nat.w, 1080 / nat.h) * scale   // 比畫面大才縮小，否則原尺寸
+    fg = { width: nat.w * k, height: nat.h * k }
+  }
+  return (
+    <>
+      <img className="kbg kbg-blur" src={src} alt="" />
+      <div className="kbg kbg-center">
+        <img src={src} alt="" style={fg} onLoad={e => setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} />
+      </div>
+    </>
   )
 }

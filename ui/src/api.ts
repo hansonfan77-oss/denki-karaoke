@@ -54,7 +54,8 @@ export interface Song {
 }
 
 // ---------------- 第 4 批：卡拉影片（歌詞與對時間）
-export interface LyricLine { t: number; end: number | null; text: string }
+export interface WordTime { text: string; t: number; end: number }
+export interface LyricLine { t: number; end: number | null; text: string; words?: WordTime[] | null }
 export type LyricsSource = 'lrclib' | 'ai' | 'lrc' | 'manual'
 export interface Lyrics {
   source: LyricsSource
@@ -78,7 +79,7 @@ export interface LrclibResult {
 }
 export interface KaraokeSettings {
   style: import('./karaoke/lyricsView').KStyle
-  background: { kind: 'auto' | 'video' | 'color' | 'image' | 'cover'; color: string }
+  background: { kind: 'auto' | 'video' | 'color' | 'image' | 'cover'; color: string; fit: 'fill' | 'fit' | 'center' }
   audio: { mode: ModeId; key: number; guide: number }
   alsoLrc: boolean
   fonts: { id: string; label: string; family: string }[]
@@ -221,6 +222,7 @@ export const api = {
   parseLrc: (text: string) => call<{ lines: LyricLine[]; lang: string }>('api/lyrics/parse-lrc', json({ text })),
   alignStatus: () => call<AlignStatus>('api/align/status'),
   align: (slug: string, text: string, lang?: string) => call<AlignJob>(`api/songs/${enc(slug)}/align`, json({ text, lang })),
+  refine: (slug: string) => call<AlignJob>(`api/songs/${enc(slug)}/refine`, { method: 'POST' }),
   alignJob: (id: string) => call<AlignJob>(`api/align-jobs/${id}`),
   cancelAlign: (id: string) => call<AlignJob>(`api/align-jobs/${id}/cancel`, { method: 'POST' }),
   // 第 5 批

@@ -57,8 +57,10 @@ DEFAULT_STYLE = {
     "plateOpacity": 50,      # 0~100
     "countdown": True,
     "sweep": True,
+    "sweepWord": True,       # 有 AI 逐字時間的句子用逐字掃色（沒有的句子自動用整句均分）
 }
-DEFAULT_BG = {"kind": "auto", "color": "#1F2D36"}   # auto / video / color / image / cover
+DEFAULT_BG = {"kind": "auto", "color": "#1F2D36", "fit": "fill"}   # kind: auto / video / color / image / cover
+BG_FITS = ("fill", "fit", "center")   # 自選圖片：填滿（裁切）/ 完整顯示 / 置中（原尺寸），空白處用模糊的同一張圖補
 BG_KINDS = ("auto", "video", "color", "image", "cover")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
@@ -101,13 +103,15 @@ def normalize_style(d: Optional[dict]) -> dict:
     s["plateOpacity"] = int(_num(d.get("plateOpacity"), 0, 100, s["plateOpacity"]))
     s["countdown"] = bool(d.get("countdown", s["countdown"]))
     s["sweep"] = bool(d.get("sweep", s["sweep"]))
+    s["sweepWord"] = bool(d.get("sweepWord", s["sweepWord"]))
     return s
 
 
 def normalize_bg(d: Optional[dict]) -> dict:
     d = d or {}
     return {"kind": d.get("kind") if d.get("kind") in BG_KINDS else "auto",
-            "color": _color(d.get("color"), DEFAULT_BG["color"])}
+            "color": _color(d.get("color"), DEFAULT_BG["color"]),
+            "fit": d.get("fit") if d.get("fit") in BG_FITS else "fill"}
 
 
 def _settings_path() -> Path:
@@ -229,7 +233,7 @@ def resolve_bg(song: Song, bg: dict) -> dict:
     if kind == "image" and not bg_image_path(song):
         kind = "color"
     path = {"video": song.source_path, "cover": cover_path(song), "image": bg_image_path(song)}.get(kind)
-    return {"kind": kind, "color": bg["color"], "path": str(path) if path else None}
+    return {"kind": kind, "color": bg["color"], "fit": bg.get("fit", "fill"), "path": str(path) if path else None}
 
 
 # ------------------------------------------------------------------ 版面（跟預覽共用的數字）
@@ -274,7 +278,8 @@ def timed(lines: list[dict], offset: float) -> list[dict]:
         end = ln["end"] + offset if ln.get("end") is not None else min(nxt - 0.05, t + 6)
         if not end > t:
             end = t + 0.5
-        out.append({"t": t, "end": end, "text": ln["text"]})
+        words = [{**w, "t": w["t"] + offset, "end": w["end"] + offset} for w in ln["words"]] if ln.get("words") else None
+        out.append({"t": t, "end": end, "text": ln["text"], "words": words})
     return out
 
 
@@ -364,10 +369,7 @@ def build_ass(lines: list[dict], offset: float, style: dict, duration: float) ->
         else:
             pos = f"\\an9\\pos({W - pad_h:.0f},{y:.0f})"
         fs_tag = f"\\fs{size:.0f}" if abs(size - fs) > 0.5 else ""
-        pre = max(0, int(round((ln["t"] - a) * 100)))
-        dur = max(1, int(round((ln["end"] - ln["t"]) * 100)))
-        kara = f"{{\\k{pre}}}{{\\kf{dur}}}" if s["sweep"] else f"{{\\k{pre}}}{{\\k1}}"
-        ev.append(f"Dialogue: 2,{_ts(a)},{_ts(v)},Lyric,,0,0,0,,{{{pos}{fs_tag}}}{kara}{_esc(ln['text'])}")
+        ev.append(f"Dialogue: 2,{_ts(a)},{_ts(v)},Lyric,,0,0,0,,{{{pos}{fs_tag}}}{_karaoke(ln, a, s)}")
 
     if s["countdown"]:
         for j, t in countdowns(L):
@@ -390,6 +392,27 @@ def build_ass(lines: list[dict], offset: float, style: dict, duration: float) ->
                       f"{{\\an7\\pos(0,{g['plateTop']:.0f})\\1c&H{color[5:7]}{color[3:5]}{color[1:3]}&\\1a&H{alpha:02X}&\\bord0\\shad0\\p1}}{draw}")
 
     return "\n".join(head + ev) + "\n"
+
+
+def _karaoke(ln: dict, a: float, s: dict) -> str:
+    """一句的卡拉OK 標籤。時間單位是百分之一秒，從字幕出現（a）開始算。
+    逐字：每一段各自一個 \\kf，段與段之間的空檔用沒有字的 \\k 補上；整句：一個 \\kf 從頭掃到尾；不掃色：開始唱時整句一次變色。"""
+    cs = lambda x: max(0, int(round(x * 100)))  # noqa: E731
+    if not s["sweep"]:
+        return f"{{\\k{cs(ln['t'] - a)}}}{{\\k1}}{_esc(ln['text'])}"
+    words = ln.get("words") if s.get("sweepWord", True) else None
+    if not words:
+        return f"{{\\k{cs(ln['t'] - a)}}}{{\\kf{max(1, cs(ln['end'] - ln['t']))}}}{_esc(ln['text'])}"
+    out, clock = [], 0      # clock：目前累計到哪（百分之一秒，從 a 算）
+    for w in words:
+        st, en = cs(w["t"] - a), cs(w["end"] - a)
+        if st > clock:
+            out.append(f"{{\\k{st - clock}}}")
+            clock = st
+        dur = max(1, en - clock)
+        out.append(f"{{\\kf{dur}}}{_esc(w['text'])}")
+        clock += dur
+    return "".join(out)
 
 
 def _merge(spans: list[tuple[float, float]], join: float = 0.4) -> list[tuple[float, float]]:
@@ -460,10 +483,18 @@ def _bg_input(bg: dict, duration: float) -> tuple[list[str], str]:
                 f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black,"
                 f"setsar=1,fps={FPS}")
     if bg["kind"] in ("image", "cover"):
-        chain = f"[0:v]{fill},setsar=1"
+        inp = ["-loop", "1", "-framerate", str(FPS), "-t", f"{duration:.2f}", "-i", bg["path"]]
+        blur = "boxblur=40:2,colorchannelmixer=rr=0.7:gg=0.7:bb=0.7"
+        fit = bg.get("fit", "fill") if bg["kind"] == "image" else "fill"
         if bg["kind"] == "cover":
-            chain += ",boxblur=40:2,colorchannelmixer=rr=0.7:gg=0.7:bb=0.7"
-        return (["-loop", "1", "-framerate", str(FPS), "-t", f"{duration:.2f}", "-i", bg["path"]], chain)
+            return inp, f"[0:v]{fill},setsar=1,{blur}"
+        if fit == "fill":
+            return inp, f"[0:v]{fill},setsar=1"
+        # 完整顯示／置中：底下鋪一張模糊放大的同一張圖，上面放完整的圖（比例不變）
+        fg = (f"scale={W}:{H}:force_original_aspect_ratio=decrease" if fit == "fit"
+              else f"scale='min(iw,{W})':'min(ih,{H})':force_original_aspect_ratio=decrease")
+        return inp, (f"[0:v]split[bga][bgb];[bga]{fill},setsar=1,{blur}[bgblur];[bgb]{fg},setsar=1[bgfg];"
+                     f"[bgblur][bgfg]overlay=(W-w)/2:(H-h)/2")
     c = bg["color"][1:]
     return (["-f", "lavfi", "-t", f"{duration:.2f}", "-i", f"color=c=0x{c}:s={W}x{H}:r={FPS}"], "[0:v]setsar=1")
 

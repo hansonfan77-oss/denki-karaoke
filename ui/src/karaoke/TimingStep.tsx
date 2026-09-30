@@ -11,12 +11,13 @@ const UNDO_MAX = 60
 
 type Snapshot = { lines: LyricLine[]; offset: number }
 
-export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
+export default function TimingStep({ song, initial, onBack, onSaved, onNext, onRefined }: {
   song: Song
   initial: Lyrics
   onBack: () => void
   onSaved: (l: Lyrics) => void
   onNext?: () => void
+  onRefined: (l: Lyrics) => void
 }) {
   const slug = song.slug
   const [lines, setLines] = useState<LyricLine[]>(initial.lines)
@@ -110,6 +111,27 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
     edit({ lines: setStart(state.current.lines, i, p - o) })
   }, [edit])
 
+  // ---------------- 用 AI 精修掃色（補上每個字的時間，每句的開始時間不動）
+  const [refine, setRefine] = useState<{ msg: string; pct: number; err?: string } | null>(null)
+  const wordLines = lines.filter(l => l.words?.length).length
+  const startRefine = async () => {
+    engine?.pause()
+    setRefine({ msg: '準備中…', pct: 0 })
+    try {
+      if (saveState !== 'saved') await saveNow()
+      let j = await api.refine(slug)
+      while (j.state === 'running') {
+        setRefine({ msg: j.message, pct: j.progress })
+        await new Promise(r => setTimeout(r, 500))
+        try { j = await api.alignJob(j.id) } catch { /* 再試 */ }
+      }
+      if (j.state === 'done' && j.lyrics) { setRefine(null); onRefined(j.lyrics) }
+      else setRefine({ msg: '', pct: 0, err: j.error || '已取消' })
+    } catch (e) {
+      setRefine({ msg: '', pct: 0, err: (e as Error).message })
+    }
+  }
+
   /** 整首一起移：算出位移量，讓選取的句子剛好在「現在」開始（歌詞版本跟影片差十幾秒時最快） */
   const alignAllToNow = () => {
     const { pos: p, sel: i, lines: ls } = state.current
@@ -127,7 +149,7 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
     if (!editing) return
     const text = editing.text.trim()
     if (text && text !== lines[editing.i].text) {
-      edit({ lines: lines.map((l, k) => (k === editing.i ? { ...l, text } : l)) })
+      edit({ lines: lines.map((l, k) => (k === editing.i ? { ...l, text, words: null } : l)) })   // 改了字，逐字時間對不上了 → 這句改回整句均分
     }
     setEditing(null)
   }
@@ -306,6 +328,22 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext }: {
           <div className="spacer" />
           <button className="btn sm" onClick={doUndo} disabled={!undo.current.length}>復原</button>
         </div>
+        <div className="kt-word">
+          {wordLines > 0
+            ? <span className="kt-badge">逐字掃色（AI 精修）：{wordLines}/{lines.length} 句</span>
+            : <span className="kt-badge off">目前是整句均分掃色</span>}
+          <div className="spacer" />
+          <button className="btn sm" onClick={startRefine} disabled={!!refine && !refine.err}
+            title="AI 聽人聲，補上每個字的時間；每句的開始時間不會改">
+            {wordLines > 0 ? '重新精修' : '用 AI 精修掃色'}
+          </button>
+        </div>
+        {refine && (
+          <div className={`notice ${refine.err ? 'error' : 'warn'} kt-refine`}>
+            {refine.err ? `精修失敗：${refine.err}` : `${refine.msg}（${Math.round(refine.pct)}%）`}
+            {refine.err && <button className="linkbtn" onClick={() => setRefine(null)}>關閉</button>}
+          </div>
+        )}
         <div className="kt-tip">
           <b>怎麼對：</b>點一句選取 → 按播放 → 歌手唱到這句時按<kbd>空白鍵</kbd>，這句就設成現在，並自動跳到下一句，可以跟著歌一句一句點下去。
         </div>

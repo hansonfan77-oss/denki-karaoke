@@ -239,12 +239,15 @@ class AlignJob:
 ALIGN_JOBS: dict[str, AlignJob] = {}
 
 
-def _run_align(job: AlignJob, song: Song, text: str, lang: Optional[str]) -> None:
+def _run_align(job: AlignJob, song: Song, text: Optional[str], lang: Optional[str]) -> None:
     def on_progress(stage: str, pct: float, msg: str) -> None:
         job.stage, job.progress, job.message = stage, round(pct, 1), msg
 
     try:
-        job.lyrics = align.align_song(song, text, lang=lang, progress=on_progress, cancel=job._cancel)
+        if text is None:     # 精修掃色：用現有的歌詞
+            job.lyrics = align.refine_song(song, progress=on_progress, cancel=job._cancel)
+        else:
+            job.lyrics = align.align_song(song, text, lang=lang, progress=on_progress, cancel=job._cancel)
         job.state, job.progress, job.message = "done", 100.0, "完成"
     except align.Cancelled:
         job.state, job.message = "cancelled", "已取消"
@@ -366,6 +369,7 @@ class LyricLine(BaseModel):
     t: float
     end: Optional[float] = None
     text: str
+    words: Optional[list[dict]] = None
 
 
 class LyricsBody(BaseModel):
@@ -665,6 +669,26 @@ def create_app() -> FastAPI:
         job = AlignJob(id=uuid.uuid4().hex[:10], slug=slug)
         ALIGN_JOBS[job.id] = job
         threading.Thread(target=_run_align, args=(job, s, body.text, body.lang), daemon=True).start()
+        return job.public()
+
+    @app.post("/api/songs/{slug}/refine")
+    def start_refine(slug: str):
+        s = get_song(slug)
+        lyr = lyrics.load(s)
+        if not lyr or not lyr["lines"]:
+            raise HTTPException(400, "這首歌還沒有歌詞。")
+        try:
+            align.vocals_for(s)
+        except align.AlignError as e:
+            raise HTTPException(400, str(e)) from e
+        for j in ALIGN_JOBS.values():
+            if j.state == "running":
+                if j.slug == slug:
+                    return j.public()
+                raise HTTPException(409, "另一首歌正在對時間，請等它完成。")
+        job = AlignJob(id=uuid.uuid4().hex[:10], slug=slug)
+        ALIGN_JOBS[job.id] = job
+        threading.Thread(target=_run_align, args=(job, s, None, None), daemon=True).start()
         return job.public()
 
     @app.get("/api/align-jobs/{job_id}")

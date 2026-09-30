@@ -135,6 +135,15 @@ def lyrics_tests(r, make_test_video) -> None:
             r.check("AI 對時間流程（測試模式）", got["source"] == "ai" and got["lang"] == "ja" and len(ts) == 3
                     and ts == sorted(ts) and all(x["end"] and x["end"] > x["t"] for x in got["lines"]),
                     f"3 句：{', '.join(f'{t:.1f}' for t in ts)} 秒")
+            r.check("AI 對時間會存逐字時間", all(x.get("words") and "".join(w["text"] for w in x["words"]) == x["text"]
+                                            for x in got["lines"]), "每句都有，段落接起來＝原句")
+            # 精修掃色：使用者調過的開始時間不能被改掉
+            mine = [dict(x, t=x["t"] + 1.5, words=None) for x in got["lines"]]
+            lyrics.save(song, mine, source="lrclib", offset=0.8)
+            ref = align.refine_song(song)
+            r.check("AI 精修掃色保留原本的開始時間", [x["t"] for x in ref["lines"]] == [x["t"] for x in mine]
+                    and all(x.get("words") and abs(x["words"][0]["t"] - x["t"]) < 0.01 for x in ref["lines"])
+                    and ref["source"] == "lrclib" and ref["offset"] == 0.8, "開始時間、來源、整體位移都沒變，補上逐字時間")
 
             payload = os.urandom(3_000_000)
             url, srv = _serve_bytes({"/m.pt": (200, payload)})
@@ -198,6 +207,13 @@ def karaoke_video_tests(r, make_test_video) -> None:
     wide = kvideo.fit_size("あ" * 40, 64, 70)
     r.check("太長的句子自動縮小", wide < 64 and kvideo.text_width("あ" * 40, wide) <= 1920 - 140 + 1, f"字高 64 → {wide:.0f}")
     no_plate = kvideo.build_ass(lines, 0, {**kvideo.DEFAULT_STYLE, "plate": "none", "countdown": False, "sweep": False}, 45)
+    wl = [{"t": 2.0, "end": 4.0, "text": "あいう、えお", "words": [
+        {"text": "あい", "t": 2.0, "end": 2.4}, {"text": "う、", "t": 2.4, "end": 3.2}, {"text": "えお", "t": 3.6, "end": 4.0}]}]
+    wass = [x for x in kvideo.build_ass(wl, 0, kvideo.DEFAULT_STYLE, 10).splitlines() if x.startswith("Dialogue: 2,")][0]
+    line_only = [x for x in kvideo.build_ass(wl, 0, {**kvideo.DEFAULT_STYLE, "sweepWord": False}, 10).splitlines()
+                 if x.startswith("Dialogue: 2,")][0]
+    r.check("逐字掃色字幕", wass.count("\\kf") == 3 and "\\k40}" in wass and line_only.count("\\kf") == 1,
+            "每段各自掃色、段落間的空檔保留；關掉逐字＝整句一段")
     r.check("樣式開關（不用底板、不倒數、不掃色）", "Dialogue: 0," not in no_plate and "Dialogue: 1," not in no_plate
             and "\\kf" not in no_plate, "都有作用")
 
@@ -231,6 +247,14 @@ def karaoke_video_tests(r, make_test_video) -> None:
             kvideo.save_settings(song, {"background": {"kind": "color", "color": "#10302A"}})
             res2 = kvideo.render(song, out_dir=tmp / "out2", also_lrc=False)
             r.check("單色背景輸出", res2["background"] == "color" and Path(res2["files"][0]).exists(), res2["encoder"])
+            img = tmp / "直式背景.png"
+            ffmpeg.run(["-f", "lavfi", "-i", "testsrc=size=600x900", "-frames:v", "1", img])
+            kvideo.save_bg_image(song, img.name, img.read_bytes())
+            for fit in ("fit", "center"):
+                kvideo.save_settings(song, {"background": {"kind": "image", "fit": fit}})
+                res3 = kvideo.render(song, out_dir=tmp / f"out_{fit}", also_lrc=False)
+                r.check(f"自選圖片背景（{'完整顯示' if fit == 'fit' else '置中'}）",
+                        res3["background"] == "image" and Path(res3["files"][0]).exists(), "直式圖片、模糊補邊")
         finally:
             config.ROOT = saved_root
 

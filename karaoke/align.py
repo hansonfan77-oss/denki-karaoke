@@ -233,16 +233,9 @@ def _run_worker(vocals: Path, text: str, lang: str, progress: Progress,
         return data.get("words", [])
 
 
-def align_song(song: Song, text: str, *, lang: Optional[str] = None, progress: Optional[Progress] = None,
-               cancel: Optional[CancelToken] = None) -> dict:
-    """整條流程：（需要時）下載模型 → 子程序對時間 → 對應回每一句 → 存成這首歌的歌詞。回傳存好的歌詞。"""
-    progress = progress or (lambda *_: None)
-    lines = lyrics.split_plain(text)
-    if not lines:
-        raise AlignError("歌詞是空的：請貼上歌詞，一行一句。")
-    if len(lines) > 400:
-        raise AlignError("歌詞超過 400 行，看起來不像一首歌的歌詞。")
-    lang = lang or lyrics.detect_language("\n".join(lines))
+def _align_lines(song: Song, lines: list[str], lang: str, progress: Progress,
+                 cancel: Optional[CancelToken]) -> tuple[list[dict], str]:
+    """（需要時）下載模型 → 子程序對時間 → 對應回每一句（含逐字時間）。回傳 (句子, 人聲來源模式)。"""
     mode, vocals = vocals_for(song)
     if not vocals.exists():
         raise AlignError("找不到人聲中間檔，請到「伴奏處理」重新分析這首歌。")
@@ -250,7 +243,6 @@ def align_song(song: Song, text: str, *, lang: Optional[str] = None, progress: O
         raise AlignError("這台電腦還沒安裝 AI 對時間元件。請在程式右上角更新到最新版，或執行「更新並測試.bat」。")
     if not model_ready():
         download_model(progress, cancel)
-    t0 = time.perf_counter()
     if _fake():
         progress("align", 50.0, "AI 聽人聲對時間")
         words = _fake_words(vocals, lines)
@@ -258,8 +250,56 @@ def align_song(song: Song, text: str, *, lang: Optional[str] = None, progress: O
         words = _run_worker(vocals, "\n".join(lines), lang, progress, cancel)
     if cancel and cancel.cancelled:
         raise Cancelled("已取消")
-    mapped = lyrics.map_words_to_lines(words, lines)
+    return lyrics.map_words_to_lines(words, lines), mode
+
+
+def align_song(song: Song, text: str, *, lang: Optional[str] = None, progress: Optional[Progress] = None,
+               cancel: Optional[CancelToken] = None) -> dict:
+    """貼上的歌詞 → AI 對時間 → 存成這首歌的歌詞（含逐字時間）。回傳存好的歌詞。"""
+    progress = progress or (lambda *_: None)
+    lines = lyrics.split_plain(text)
+    if not lines:
+        raise AlignError("歌詞是空的：請貼上歌詞，一行一句。")
+    if len(lines) > 400:
+        raise AlignError("歌詞超過 400 行，看起來不像一首歌的歌詞。")
+    lang = lang or lyrics.detect_language("\n".join(lines))
+    t0 = time.perf_counter()
+    mapped, mode = _align_lines(song, lines, lang, progress, cancel)
     progress("save", 100.0, "完成")
     logging.info("AI 對時間：%s，%d 句，%s，人聲來源 %s，%.1f 秒", song.slug, len(lines), lang, mode,
                  time.perf_counter() - t0)
     return lyrics.save(song, mapped, source="ai", lang=lang)
+
+
+MAX_LINE_SPAN = 20.0   # AI 算出一句超過這麼長，多半是對錯了，這句不用逐字資料
+
+
+def refine_song(song: Song, *, progress: Optional[Progress] = None, cancel: Optional[CancelToken] = None) -> dict:
+    """用 AI 精修掃色：保留目前每一句的開始時間（使用者調好的），只補上每句裡每個字的時間。
+
+    AI 對出來的逐字時間以「那一句在 AI 裡的開始」為基準，整句平移到使用者的開始時間；
+    結束時間沒設的句子，用最後一個字的結束。
+    """
+    progress = progress or (lambda *_: None)
+    cur = lyrics.load(song)
+    if not cur or not cur["lines"]:
+        raise AlignError("這首歌還沒有歌詞。")
+    lines = [ln["text"] for ln in cur["lines"]]
+    lang = cur.get("lang") or lyrics.detect_language("\n".join(lines))
+    t0 = time.perf_counter()
+    mapped, mode = _align_lines(song, lines, lang, progress, cancel)
+    out, got = [], 0
+    for mine, ai in zip(cur["lines"], mapped):
+        item = {k: v for k, v in mine.items() if k != "words"}
+        words = ai.get("words")
+        span = (ai.get("end") or ai["t"]) - ai["t"]
+        if words and 0 < span <= MAX_LINE_SPAN:
+            item["words"] = lyrics.shift_words(words, mine["t"] - ai["t"])
+            if item.get("end") is None:
+                item["end"] = item["words"][-1]["end"]
+            got += 1
+        out.append(item)
+    progress("save", 100.0, "完成")
+    logging.info("AI 精修掃色：%s，%d/%d 句有逐字時間，人聲來源 %s，%.1f 秒", song.slug, got, len(lines), mode,
+                 time.perf_counter() - t0)
+    return lyrics.save(song, out, source=cur["source"], offset=cur["offset"], lang=lang, lrclib=cur.get("lrclib"))
