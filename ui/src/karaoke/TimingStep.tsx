@@ -113,24 +113,37 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
 
   // ---------------- 用 AI 精修掃色（補上每個字的時間，每句的開始時間不動）
   const [refine, setRefine] = useState<{ msg: string; pct: number; err?: string } | null>(null)
-  const wordLines = lines.filter(l => l.words?.length).length
-  const startRefine = async () => {
+  const hasWords = (l: LyricLine) => !!l.words?.length
+  const wordLines = lines.filter(l => hasWords(l) && !l.even).length
+  const storedLines = lines.filter(hasWords).length
+  /** line＝只精修這一句（其他句不動）；不給＝整首 */
+  const startRefine = async (line?: number) => {
     engine?.pause()
-    setRefine({ msg: '準備中…', pct: 0 })
+    const who = line === undefined ? '' : `第 ${line + 1} 句：`
+    setRefine({ msg: `${who}準備中…`, pct: 0 })
     try {
       if (saveState !== 'saved') await saveNow()
-      let j = await api.refine(slug)
+      let j = await api.refine(slug, line)
       while (j.state === 'running') {
-        setRefine({ msg: j.message, pct: j.progress })
+        setRefine({ msg: who + j.message, pct: j.progress })
         await new Promise(r => setTimeout(r, 500))
         try { j = await api.alignJob(j.id) } catch { /* 再試 */ }
       }
-      if (j.state === 'done' && j.lyrics) { setRefine(null); onRefined(j.lyrics) }
-      else setRefine({ msg: '', pct: 0, err: j.error || '已取消' })
+      if (j.state === 'done' && j.lyrics) {
+        setRefine(null)
+        if (line === undefined) onRefined(j.lyrics)
+        else {
+          // 只把這一句的結果併進目前的畫面（可以 Ctrl+Z 復原；選取的句子不變）
+          const got = j.lyrics.lines[line]
+          if (got) edit({ lines: state.current.lines.map((l, k) => (k === line ? { ...l, words: got.words ?? null, end: got.end, even: null } : l)) })
+        }
+      } else setRefine({ msg: '', pct: 0, err: who + (j.error || '已取消') })
     } catch (e) {
       setRefine({ msg: '', pct: 0, err: (e as Error).message })
     }
   }
+
+  const busy = !!refine && !refine.err
 
   /** 整首一起移：算出位移量，讓選取的句子剛好在「現在」開始（歌詞版本跟影片差十幾秒時最快） */
   const alignAllToNow = () => {
@@ -138,6 +151,10 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
     if (!ls[i]) return
     edit({ offset: Math.round((p - ls[i].t) * 100) / 100 })
   }
+
+  /** 逐字／均分切換：逐字時間保留，只是這句先不用（隨時可以切回來） */
+  const setEven = (i: number | 'all', even: boolean) =>
+    edit({ lines: state.current.lines.map((l, k) => (i === 'all' || k === i) && hasWords(l) ? { ...l, even: even || null } : l) })
 
   const deleteLine = (i: number) => {
     if (state.current.lines.length <= 1) return
@@ -149,7 +166,7 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
     if (!editing) return
     const text = editing.text.trim()
     if (text && text !== lines[editing.i].text) {
-      edit({ lines: lines.map((l, k) => (k === editing.i ? { ...l, text, words: null } : l)) })   // 改了字，逐字時間對不上了 → 這句改回整句均分
+      edit({ lines: lines.map((l, k) => (k === editing.i ? { ...l, text, words: null, even: null } : l)) })   // 改了字，逐字時間對不上了 → 這句改回整句均分
     }
     setEditing(null)
   }
@@ -330,17 +347,20 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
         </div>
         <div className="kt-word">
           {wordLines > 0
-            ? <span className="kt-badge">逐字掃色（AI 精修）：{wordLines}/{lines.length} 句</span>
-            : <span className="kt-badge off">目前是整句均分掃色</span>}
+            ? <span className="kt-badge">逐字掃色：{wordLines}/{lines.length} 句</span>
+            : <span className="kt-badge off">目前全部整句均分</span>}
           <div className="spacer" />
           {wordLines > 0 && (
-            <button className="btn sm" disabled={!!refine && !refine.err}
-              title="刪掉 AI 逐字時間，整首改回整句均分（可以按 Ctrl+Z 復原）"
-              onClick={() => edit({ lines: state.current.lines.map(l => ({ ...l, words: null })) })}>改回整句均分</button>
+            <button className="linkbtn" title="整首切成整句均分（逐字時間保留，可以再切回來）"
+              onClick={() => setEven('all', true)}>全部改均分</button>
           )}
-          <button className="btn sm" onClick={startRefine} disabled={!!refine && !refine.err}
-            title="AI 聽人聲，補上每個字的時間；每句的開始時間不會改">
-            {wordLines > 0 ? '重新精修' : '用 AI 精修掃色'}
+          {storedLines > wordLines && (
+            <button className="linkbtn" title="有逐字時間的句子全部切回逐字"
+              onClick={() => setEven('all', false)}>全部改逐字</button>
+          )}
+          <button className="btn sm" onClick={() => startRefine()} disabled={busy}
+            title="AI 聽整首人聲，補上每個字的時間；每句的開始時間不會改">
+            {storedLines > 0 ? '整首重新精修' : '用 AI 精修掃色'}
           </button>
         </div>
         {refine && (
@@ -368,7 +388,10 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
                   ) : (
                     <span className="kt-text">{ln.text}</span>
                   )}
-                  {ln.words?.length ? <span className="kt-wtag" title="這句用 AI 逐字掃色">逐字</span> : null}
+                  <span className={`kt-wtag ${hasWords(ln) && !ln.even ? '' : 'off'}`}
+                    title={hasWords(ln) && !ln.even ? '這句用逐字掃色' : '這句用整句均分掃色'}>
+                    {hasWords(ln) && !ln.even ? '逐字' : '均分'}
+                  </span>
                 </div>
                 {on && (
                   <div className="kt-tools">
@@ -377,14 +400,21 @@ export default function TimingStep({ song, initial, onBack, onSaved, onNext, onR
                     <button className="btn sm primary" onClick={() => stampNow(i)} disabled={!engine}title="把這句的開始時間設成目前播放到的位置（播放中也可以按空白鍵）">設成現在</button>
                     <button className="linkbtn" onClick={() => playFrom(i)} disabled={!engine}>從這句播放</button>
                     <div className="spacer" />
-                    {ln.words?.length ? (
-                      <button className="linkbtn" title="只把這一句改回整句均分掃色（Ctrl+Z 可復原）"
-                        onClick={() => edit({ lines: state.current.lines.map((l, k) => (k === i ? { ...l, words: null } : l)) })}>
-                        這句改整句均分
-                      </button>
-                    ) : null}
                     <button className="linkbtn" onClick={() => setEditing({ i, text: ln.text })}>改字</button>
                     <button className="linkbtn" onClick={() => deleteLine(i)} disabled={lines.length <= 1}>刪除</button>
+                    <div className="kt-sweep" onClick={e => e.stopPropagation()}>
+                      <span className="muted small">掃色</span>
+                      <div className="seg sm">
+                        <button className={!hasWords(ln) || ln.even ? 'on' : ''} onClick={() => setEven(i, true)}
+                          disabled={!hasWords(ln)}>均分</button>
+                        <button className={hasWords(ln) && !ln.even ? 'on' : ''} onClick={() => setEven(i, false)}
+                          disabled={!hasWords(ln)} title={hasWords(ln) ? '' : '這句還沒有逐字時間，先按「精修這句」'}>逐字</button>
+                      </div>
+                      <button className="linkbtn" onClick={() => startRefine(i)} disabled={busy}
+                        title="AI 只聽這一句附近的人聲，補上這句每個字的時間（約 10–20 秒）">
+                        {hasWords(ln) ? '重新精修這句' : '精修這句'}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

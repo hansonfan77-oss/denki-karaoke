@@ -273,6 +273,8 @@ def clean_lines(lines: list[dict]) -> list[dict]:
         words = clean_words(ln.get("words"), item["text"])
         if words:
             item["words"] = words
+            if ln.get("even"):          # 有逐字時間，但使用者把這句切成整句均分（資料保留，可以切回來）
+                item["even"] = True
         out.append(item)
     out.sort(key=lambda x: x["t"])
     return out

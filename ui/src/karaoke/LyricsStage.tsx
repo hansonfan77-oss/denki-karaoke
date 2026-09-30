@@ -27,7 +27,7 @@ export default function LyricsStage({ lines, time, width, style = DEFAULT_STYLE,
   const k = width / VW
   const h = Math.round((width * 9) / 16)
   const g = geometry(style)
-  const view = stageAt(lines, time, style.sweepWord !== false)
+  const view = stageAt(lines, time, true)   // 逐字／均分在「對時間」逐句切換
   const plateColor = style.plate === 'white' ? '255,255,255' : '0,0,0'
   const stroke = style.outline * k
   const family = FONT_CSS[style.font] ?? FONT_CSS.jhenghei

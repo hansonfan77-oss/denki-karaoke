@@ -102,7 +102,6 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
         : <div className="kbg" style={{ background: bg.color }} />
 
   const tl = useMemo(() => timed(lyrics.lines, lyrics.offset), [lyrics])
-  const hasWords = lyrics.lines.some(l => l.words?.length)
   const firstLine = tl[0]?.t ?? 0
   const duration = engine?.duration ?? song.duration ?? 0
 
@@ -178,10 +177,6 @@ export default function StyleStep({ song, lyrics, settings, onSettings, onBack, 
           <div className="ksty-checks">
             <label className="check"><input type="checkbox" checked={style.countdown} onChange={e => setS({ countdown: e.target.checked })} />前奏／間奏倒數 ●●●</label>
             <label className="check"><input type="checkbox" checked={style.sweep} onChange={e => setS({ sweep: e.target.checked })} />掃色</label>
-            <label className="check" title={hasWords ? '有 AI 逐字時間的句子跟著歌手的節奏掃色；關掉＝整句均分' : '這首歌還沒有 AI 逐字時間（到「對時間」按「用 AI 精修掃色」）'}>
-              <input type="checkbox" checked={style.sweepWord && hasWords} disabled={!style.sweep || !hasWords}
-                onChange={e => setS({ sweepWord: e.target.checked })} />逐字掃色（AI 精修）{!hasWords && '：尚未精修'}
-            </label>
           </div>
 
           <div className="ksty-h">字幕底板</div>

@@ -376,6 +376,10 @@ h1 { margin: 0; font-size: 22px; }
 .kt-word { display: flex; align-items: center; gap: 8px; margin: 10px 12px 0; }
 .kt-badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--accent-soft); color: var(--accent-dark); }
 .kt-wtag { margin-left: auto; flex: none; padding: 1px 7px; border-radius: 999px; font-size: 11px; background: var(--accent-soft); color: var(--accent-dark); }
+.kt-wtag.off { background: var(--line); color: var(--muted); }
+.kt-sweep { flex-basis: 100%; display: flex; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.seg.sm button { height: 26px; padding: 0 10px; font-size: 12px; }
+.seg button:disabled { opacity: .45; }
 .kt-badge.off { background: var(--line); color: var(--muted); font-weight: 500; }
 .kt-refine { margin: 8px 12px 0; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 .kbg-center { display: flex; align-items: center; justify-content: center; }

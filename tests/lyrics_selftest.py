@@ -149,6 +149,24 @@ def lyrics_tests(r, make_test_video) -> None:
                     and all(x.get("words") and abs(x["words"][0]["t"] - x["t"]) < 0.01 for x in ref["lines"])
                     and ref["source"] == "lrclib" and ref["offset"] == 0.8, "開始時間、來源、整體位移都沒變，補上逐字時間")
 
+            # v0.6.3：逐句切換「均分」（逐字時間保留）＋單句精修
+            sw = [dict(x) for x in ref["lines"]]
+            sw[0]["even"] = True
+            sw[1] = {k: v for k, v in sw[1].items() if k != "words"}
+            lyrics.save(song, sw, source="lrclib", offset=0.8)
+            back = lyrics.load(Song.load(song.dir))["lines"]
+            from karaoke import kvideo
+            tl = kvideo.timed(back, 0.8)
+            r.check("逐句切成均分：逐字時間保留、輸出用均分", back[0].get("even") is True and bool(back[0].get("words"))
+                    and tl[0]["words"] is None and tl[2]["words"] is not None, "第 1 句均分、第 3 句逐字")
+            one = align.refine_song(song, line=1)
+            ol = one["lines"]
+            r.check("單句精修只改那一句", bool(ol[1].get("words")) and not ol[1].get("even")
+                    and abs(ol[1]["words"][0]["t"] - ol[1]["t"]) < 0.01
+                    and [x["t"] for x in ol] == [x["t"] for x in sw]
+                    and ol[0].get("even") is True and ol[0]["words"] == back[0]["words"],
+                    "第 2 句補上逐字，其他句（含均分設定）不動")
+
             payload = os.urandom(3_000_000)
             url, srv = _serve_bytes({"/m.pt": (200, payload)})
             os.environ["DENKI_ALIGN_MODEL_URL"] = url + "/m.pt"
@@ -214,10 +232,10 @@ def karaoke_video_tests(r, make_test_video) -> None:
     wl = [{"t": 2.0, "end": 4.0, "text": "あいう、えお", "words": [
         {"text": "あい", "t": 2.0, "end": 2.4}, {"text": "う、", "t": 2.4, "end": 3.2}, {"text": "えお", "t": 3.6, "end": 4.0}]}]
     wass = [x for x in kvideo.build_ass(wl, 0, kvideo.DEFAULT_STYLE, 10).splitlines() if x.startswith("Dialogue: 2,")][0]
-    line_only = [x for x in kvideo.build_ass(wl, 0, {**kvideo.DEFAULT_STYLE, "sweepWord": False}, 10).splitlines()
+    line_only = [x for x in kvideo.build_ass([{**wl[0], "even": True}], 0, kvideo.DEFAULT_STYLE, 10).splitlines()
                  if x.startswith("Dialogue: 2,")][0]
     r.check("逐字掃色字幕", wass.count("\\kf") == 3 and "\\k40}" in wass and line_only.count("\\kf") == 1,
-            "每段各自掃色、段落間的空檔保留；關掉逐字＝整句一段")
+            "每段各自掃色、段落間的空檔保留；這句切成均分＝整句一段")
     r.check("樣式開關（不用底板、不倒數、不掃色）", "Dialogue: 0," not in no_plate and "Dialogue: 1," not in no_plate
             and "\\kf" not in no_plate, "都有作用")
 

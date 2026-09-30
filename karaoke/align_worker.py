@@ -76,7 +76,11 @@ def main() -> int:
     # 用名稱（不是檔案路徑）載入：Whisper 才會套用這個模型專用的「對齊注意力頭」，時間比較準。
     # download_root 裡已經有核對過的檔案，所以不會再下載。
     model = stable_whisper.load_model(job["model"], device=device, download_root=job["model_dir"])
-    audio = ffmpeg.decode_pcm(job["audio"], 16000).copy()   # 可寫入的陣列（PyTorch 需要）
+    audio = ffmpeg.decode_pcm(job["audio"], 16000)
+    if job.get("clip"):      # 單句精修：只聽這一小段（回傳的時間以片段開頭為 0）
+        a, b = job["clip"]
+        audio = audio[int(a * 16000):int(b * 16000)]
+    audio = audio.copy()     # 可寫入的陣列（PyTorch 需要）
     if len(audio) < 16000:
         return fail("人聲音檔太短或是空的。")
 

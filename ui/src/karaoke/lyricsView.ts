@@ -24,7 +24,7 @@ export function timed(lines: LyricLine[], offset: number): TimedLine[] {
     const next = i + 1 < lines.length ? lines[i + 1].t + offset : Infinity
     let end = ln.end != null ? ln.end + offset : Math.min(next - 0.05, t + 6)
     if (!(end > t)) end = t + 0.5
-    const words = ln.words?.length ? ln.words.map(w => ({ ...w, t: w.t + offset, end: w.end + offset })) : null
+    const words = ln.words?.length && !ln.even ? ln.words.map(w => ({ ...w, t: w.t + offset, end: w.end + offset })) : null
     return { t, end, text: ln.text, words }
   })
 }

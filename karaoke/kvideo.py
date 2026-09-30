@@ -103,7 +103,7 @@ def normalize_style(d: Optional[dict]) -> dict:
     s["plateOpacity"] = int(_num(d.get("plateOpacity"), 0, 100, s["plateOpacity"]))
     s["countdown"] = bool(d.get("countdown", s["countdown"]))
     s["sweep"] = bool(d.get("sweep", s["sweep"]))
-    s["sweepWord"] = bool(d.get("sweepWord", s["sweepWord"]))
+    s["sweepWord"] = True    # v0.6.3 起逐字／均分改在「對時間」逐句切換，這個總開關固定開
     return s
 
 
@@ -278,7 +278,8 @@ def timed(lines: list[dict], offset: float) -> list[dict]:
         end = ln["end"] + offset if ln.get("end") is not None else min(nxt - 0.05, t + 6)
         if not end > t:
             end = t + 0.5
-        words = [{**w, "t": w["t"] + offset, "end": w["end"] + offset} for w in ln["words"]] if ln.get("words") else None
+        words = ([{**w, "t": w["t"] + offset, "end": w["end"] + offset} for w in ln["words"]]
+                 if ln.get("words") and not ln.get("even") else None)   # even＝這句切成整句均分
         out.append({"t": t, "end": end, "text": ln["text"], "words": words})
     return out
 

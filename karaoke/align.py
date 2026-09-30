@@ -155,12 +155,14 @@ def download_model(progress: Progress, cancel: Optional[CancelToken] = None) -> 
 
 
 # ------------------------------------------------------------------ 對時間
-def _fake_words(vocals: Path, lines: list[str]) -> list[dict]:
-    """測試用：找出有人聲的時間範圍，句子依字數比例平均分配。"""
+def _fake_words(vocals: Path, lines: list[str], clip: Optional[tuple[float, float]] = None) -> list[dict]:
+    """測試用：找出有人聲的時間範圍，句子依字數比例平均分配（有 clip 時時間以片段開頭為 0）。"""
     from . import ffmpeg
     import numpy as np
 
     y = ffmpeg.decode_pcm(vocals, 8000)
+    if clip:
+        y = y[int(clip[0] * 8000):int(clip[1] * 8000)]
     dur = len(y) / 8000
     a = np.abs(y)
     ref = float(np.percentile(a, 99)) if len(a) else 0.0
@@ -180,7 +182,7 @@ def _fake_words(vocals: Path, lines: list[str]) -> list[dict]:
 
 
 def _run_worker(vocals: Path, text: str, lang: str, progress: Progress,
-                cancel: Optional[CancelToken]) -> list[dict]:
+                cancel: Optional[CancelToken], clip: Optional[tuple[float, float]] = None) -> list[dict]:
     from .proc import NO_WINDOW, python_exe
 
     with tempfile.TemporaryDirectory(prefix="denki-align-") as tmp:
@@ -189,6 +191,7 @@ def _run_worker(vocals: Path, text: str, lang: str, progress: Progress,
         job.write_text(json.dumps({
             "audio": str(vocals), "text": text, "lang": lang, "model": MODEL_NAME,
             "model_dir": str(model_dir()), "out": str(out),
+            "clip": list(clip) if clip else None,
         }, ensure_ascii=False), encoding="utf-8")
         env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
         proc = subprocess.Popen([python_exe(), "-m", "karaoke.align_worker", str(job)],
@@ -234,7 +237,7 @@ def _run_worker(vocals: Path, text: str, lang: str, progress: Progress,
 
 
 def _align_lines(song: Song, lines: list[str], lang: str, progress: Progress,
-                 cancel: Optional[CancelToken]) -> tuple[list[dict], str]:
+                 cancel: Optional[CancelToken], clip: Optional[tuple[float, float]] = None) -> tuple[list[dict], str]:
     """（需要時）下載模型 → 子程序對時間 → 對應回每一句（含逐字時間）。回傳 (句子, 人聲來源模式)。"""
     mode, vocals = vocals_for(song)
     if not vocals.exists():
@@ -245,9 +248,9 @@ def _align_lines(song: Song, lines: list[str], lang: str, progress: Progress,
         download_model(progress, cancel)
     if _fake():
         progress("align", 50.0, "AI 聽人聲對時間")
-        words = _fake_words(vocals, lines)
+        words = _fake_words(vocals, lines, clip)
     else:
-        words = _run_worker(vocals, "\n".join(lines), lang, progress, cancel)
+        words = _run_worker(vocals, "\n".join(lines), lang, progress, cancel, clip)
     if cancel and cancel.cancelled:
         raise Cancelled("已取消")
     return lyrics.map_words_to_lines(words, lines), mode
@@ -274,32 +277,60 @@ def align_song(song: Song, text: str, *, lang: Optional[str] = None, progress: O
 MAX_LINE_SPAN = 20.0   # AI 算出一句超過這麼長，多半是對錯了，這句不用逐字資料
 
 
-def refine_song(song: Song, *, progress: Optional[Progress] = None, cancel: Optional[CancelToken] = None) -> dict:
+CLIP_BEFORE = 1.0    # 單句精修：從這句開始前 1 秒
+CLIP_AFTER = 1.0     # 到下一句開始後 1 秒（沒有下一句：這句開始後 MAX_LINE_SPAN 秒）
+
+
+def _line_clip(lines: list[dict], i: int, offset: float) -> tuple[float, float]:
+    """第 i 句在音檔裡的片段（秒）。歌詞時間＋整段位移＝音檔時間。"""
+    t = lines[i]["t"] + offset
+    nxt = lines[i + 1]["t"] + offset if i + 1 < len(lines) else t + MAX_LINE_SPAN
+    end = min(nxt + CLIP_AFTER, t + MAX_LINE_SPAN + CLIP_AFTER)
+    return max(0.0, t - CLIP_BEFORE), max(end, t + 2.0)
+
+
+def refine_song(song: Song, *, line: Optional[int] = None, progress: Optional[Progress] = None,
+                cancel: Optional[CancelToken] = None) -> dict:
     """用 AI 精修掃色：保留目前每一句的開始時間（使用者調好的），只補上每句裡每個字的時間。
 
     AI 對出來的逐字時間以「那一句在 AI 裡的開始」為基準，整句平移到使用者的開始時間；
-    結束時間沒設的句子，用最後一個字的結束。
+    有逐字時間的句子，結束時間＝最後一個字的結束。
+    line＝只精修這一句：只給 AI 聽這句附近的人聲，其他句完全不動。
+    精修成功的句子會切成「逐字」（拿掉 even）。
     """
     progress = progress or (lambda *_: None)
     cur = lyrics.load(song)
     if not cur or not cur["lines"]:
         raise AlignError("這首歌還沒有歌詞。")
-    lines = [ln["text"] for ln in cur["lines"]]
-    lang = cur.get("lang") or lyrics.detect_language("\n".join(lines))
+    texts = [ln["text"] for ln in cur["lines"]]
+    lang = cur.get("lang") or lyrics.detect_language("\n".join(texts))
     t0 = time.perf_counter()
-    mapped, mode = _align_lines(song, lines, lang, progress, cancel)
-    out, got = [], 0
-    for mine, ai in zip(cur["lines"], mapped):
-        item = {k: v for k, v in mine.items() if k != "words"}
+    if line is None:
+        idx = list(range(len(texts)))
+        mapped, mode = _align_lines(song, texts, lang, progress, cancel)
+    else:
+        if not 0 <= line < len(texts):
+            raise AlignError("找不到這一句。")
+        idx = [line]
+        clip = _line_clip(cur["lines"], line, cur.get("offset") or 0.0)
+        mapped, mode = _align_lines(song, [texts[line]], lang, progress, cancel, clip)
+    out = [dict(ln) for ln in cur["lines"]]
+    got = 0
+    for i, ai in zip(idx, mapped):
+        mine = out[i]
         words = ai.get("words")
         span = (ai.get("end") or ai["t"]) - ai["t"]
         if words and 0 < span <= MAX_LINE_SPAN:
-            item["words"] = lyrics.shift_words(words, mine["t"] - ai["t"])
-            if item.get("end") is None:
-                item["end"] = item["words"][-1]["end"]
+            mine["words"] = lyrics.shift_words(words, mine["t"] - ai["t"])
+            mine.pop("even", None)
+            mine["end"] = mine["words"][-1]["end"]     # 結束＝最後一個字唱完（舊的結束可能被尾奏拉長）
             got += 1
-        out.append(item)
+        elif line is None:
+            mine.pop("words", None)
+            mine.pop("even", None)
+    if line is not None and not got:
+        raise AlignError("AI 這一句對不出來（可能這段人聲太小或歌詞跟歌不一樣），這句維持原樣。")
     progress("save", 100.0, "完成")
-    logging.info("AI 精修掃色：%s，%d/%d 句有逐字時間，人聲來源 %s，%.1f 秒", song.slug, got, len(lines), mode,
-                 time.perf_counter() - t0)
+    logging.info("AI 精修掃色：%s，%s，%d/%d 句有逐字時間，人聲來源 %s，%.1f 秒", song.slug,
+                 "整首" if line is None else f"第 {line + 1} 句", got, len(idx), mode, time.perf_counter() - t0)
     return lyrics.save(song, out, source=cur["source"], offset=cur["offset"], lang=lang, lrclib=cur.get("lrclib"))
